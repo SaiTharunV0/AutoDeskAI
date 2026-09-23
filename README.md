@@ -62,7 +62,6 @@ AI Agent: ACCESS_REQUEST for Excel
 - `CHAT`
 - `CLARIFICATION`
 
-Access and installation requests require explicit action wording. For example, `I want DNR` is clarified, while `I need access to DNR` is classified as an access request.
 
 ## Tests
 
