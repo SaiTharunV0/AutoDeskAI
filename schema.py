@@ -1,6 +1,6 @@
 from typing import Optional
 from enum import Enum
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Intent(str, Enum):
@@ -14,9 +14,14 @@ class Intent(str, Enum):
 
 
 class AgentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     intent: Intent
 
-    software: Optional[str] = None
-    application: Optional[str] = None
+    software: Optional[str] = Field(default=None, max_length=80)
+    application: Optional[str] = Field(default=None, max_length=80)
 
-    message: str
+    message: str = Field(max_length=500)
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str

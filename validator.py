@@ -10,6 +10,9 @@ def validate_agent_response(
     result: AgentResponse,
     user_message: str | None = None,
 ) -> AgentResponse:
+    if user_message and result.intent in (Intent.PASSWORD_CHANGE, Intent.PASSWORD_RESET):
+        if "password" not in user_message.lower():
+            return AgentResponse(intent=Intent.CLARIFICATION, message="Which IT workflow do you need?")
 
     if result.intent == Intent.ACCESS_REQUEST and user_message:
         if not _contains_action(
@@ -40,12 +43,13 @@ def validate_agent_response(
             return result
 
     if result.intent == Intent.SOFTWARE_INSTALL:
-
+        result.application = None
         if not result.software:
             result.intent = Intent.CLARIFICATION
             result.message = "Which software would you like me to help you install?"
 
     elif result.intent == Intent.ACCESS_REQUEST:
+        result.software = None
 
         if not result.application:
             result.intent = Intent.CLARIFICATION

@@ -1,181 +1,91 @@
-import time
-import json
-from google import genai
-from google.genai import types
-
-from config import GEMINI_API_KEY
+"""Ollama classifies only a constrained, credential-free representation."""
+import re
+import ollama
+import config
 from schema import AgentResponse, Intent
 from prompts import SYSTEM_PROMPT
 from validator import validate_agent_response
+from app.catalog import SOFTWARE, APPLICATIONS
 
+class UnsafeRequest(ValueError):
+    pass
 
-MAX_HISTORY_MESSAGES = 20
+def safe_message(text: str) -> str:
+    # Do not send raw free text to any model. Preserve only known workflow tokens.
+    # This deliberately sacrifices open-ended entity discovery to guarantee that
+    # unknown text (including accidentally pasted credentials) never leaves here.
+    lowered = text.lower()
+    if re.search(r"(powershell|cmd\.exe|bash|curl|invoke-expression|execute|shell|script|rm -|&&|[;`])", lowered):
+        raise UnsafeRequest("Only password, approved software, and application access workflows are supported.")
+    if re.search(r"password\s*(?:is|=|:)\s*\S+|(?:token|secret|api[_ -]?key)\s*[:=]", lowered):
+        raise UnsafeRequest("Do not enter credentials in chat. Use the dedicated authentication form.")
+    words = re.findall(r"[a-z]+", lowered)
+    permitted = {"i", "my", "need", "want", "please", "help", "forgot", "password", "reset",
+                 "change", "update", "install", "installed", "setup", "set", "up", "download",
+                 "access", "permission", "grant", "to", "for", "me", "on", "hello", "hi"}
+    tokens = [word for word in words if word in permitted]
+    for item in SOFTWARE.values():
+        if any(re.search(r"\b" + re.escape(alias) + r"\b", lowered) for alias in item["aliases"]):
+            tokens.append("vscode")
+    for key in APPLICATIONS:
+        if re.search(r"\b" + re.escape(key) + r"\b", lowered):
+            tokens.append(key)
+    unknown = set(words) - permitted - {"vscode", "vs", "code", "visual", "studio", "tableau",
+        "can", "you", "could", "would", "like", "a", "an", "the", "some", "something",
+        "software", "application", "app", "system", "computer", "laptop", "device", "it"}
+    if unknown and any(word in tokens for word in ("install", "installed", "setup", "download")) and "vscode" not in tokens:
+        tokens.append("unapproved_software")
+    if unknown and any(word in tokens for word in ("access", "permission", "grant")) and "tableau" not in tokens:
+        tokens.append("unknown_application")
+    return " ".join(tokens) or "unspecified request"
 
-
-client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(
-        timeout=60000
-    )
-)
-
-
-def _message(role: str, text: str) -> types.Content:
-    return types.Content(
-        role=role,
-        parts=[types.Part.from_text(text=text)],
-    )
-
-
-def _resolve_pending_clarification(
-    user_message: str,
-    conversation_history: list[types.Content] | None,
-) -> AgentResponse | None:
-    if not conversation_history:
+def _resolve_pending_clarification(user_message, previous_response=None):
+    if previous_response is None or previous_response.intent != Intent.CLARIFICATION:
         return None
-
-    last_message = conversation_history[-1]
-    if last_message.role != "model" or not last_message.parts:
-        return None
-
-    try:
-        previous_response = AgentResponse.model_validate(json.loads(last_message.parts[0].text))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-
-    if previous_response.intent != Intent.CLARIFICATION:
-        return None
-
-    clarification = previous_response.message.lower()
-    value = user_message.strip()
-
-    if "which application" in clarification or "application or system" in clarification:
-        return AgentResponse(
-            intent=Intent.ACCESS_REQUEST,
-            application=value,
-            message=f"I can help you request access to {value}.",
-        )
-
-    if "which software" in clarification or "install" in clarification:
-        return AgentResponse(
-            intent=Intent.SOFTWARE_INSTALL,
-            software=value,
-            message=f"I can help you install {value}.",
-        )
-
+    text = previous_response.message.lower()
+    if "which application" in text:
+        return AgentResponse(intent=Intent.ACCESS_REQUEST, application=user_message.strip(), message="Access request identified.")
+    if "which software" in text:
+        return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=user_message.strip(), message="Installation request identified.")
     return None
 
-
-def process_request(
-    user_message: str,
-    conversation_history: list[types.Content] | None = None,
-) -> AgentResponse:
-
+def process_request(user_message: str, previous_response: AgentResponse | None = None) -> AgentResponse:
+    safe = safe_message(user_message)
+    words = set(safe.split())
+    actions = [bool(words & {"install", "installed", "setup", "download"}),
+               bool(words & {"access", "permission", "grant"}), "password" in words]
+    if sum(actions) > 1:
+        return AgentResponse(intent=Intent.CLARIFICATION, message="Please request one workflow at a time.")
+    pending = _resolve_pending_clarification(safe, previous_response)
+    if pending:
+        # Validate follow-up in the context of the prior backend-owned question.
+        return validate_agent_response(pending)
     if not user_message.strip():
-        result = AgentResponse(
-            intent=Intent.CHAT,
-            message="Please tell me how I can help with your IT request.",
-        )
-        return result
-
-    pending_result = _resolve_pending_clarification(
-        user_message,
-        conversation_history,
-    )
-    if pending_result is not None:
-        if conversation_history is not None:
-            conversation_history.extend(
-                [
-                    _message("user", user_message),
-                    _message("model", pending_result.model_dump_json()),
-                ]
-            )
-            del conversation_history[:-MAX_HISTORY_MESSAGES]
-        return pending_result
-
-    user_turn = _message("user", user_message)
-    request_contents = list(conversation_history or [])
-    request_contents.append(user_turn)
-
-    for attempt in range(3):
-
-        try:
-
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=request_contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    response_mime_type="application/json",
-                    response_schema=AgentResponse,
-                )
-            )
-
-            result = AgentResponse.model_validate_json(
-                response.text
-            )
-
-            # Our own safety validation
-            result = validate_agent_response(result, user_message)
-
-            if conversation_history is not None:
-                conversation_history.extend(
-                    [
-                        user_turn,
-                        _message("model", result.model_dump_json()),
-                    ]
-                )
-                del conversation_history[:-MAX_HISTORY_MESSAGES]
-
-            return result
-
-        except Exception as e:
-
-            print(
-                f"Gemini attempt "
-                f"{attempt + 1}/3 failed: {e}"
-            )
-
-            if attempt < 2:
-
-                wait_time = 2 ** attempt
-
-                print(
-                    f"Retrying in "
-                    f"{wait_time} seconds..."
-                )
-
-                time.sleep(wait_time)
-
-    # Technical failure should NOT pretend
-    # that the user's request was unsupported.
-    print("Gemini unavailable.")
-
-    raise RuntimeError(
-        "AI service temporarily unavailable"
-    )
+        return AgentResponse(intent=Intent.CHAT, message="Please describe your IT request.")
+    try:
+        client = ollama.Client(host=config.OLLAMA_HOST, timeout=config.OLLAMA_TIMEOUT)
+        response = client.chat(model=config.OLLAMA_MODEL,
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": safe}],
+            format=AgentResponse.model_json_schema(), think=False,
+            options={"temperature": 0, "num_predict": 180})
+        result = AgentResponse.model_validate_json(response["message"]["content"])
+        # Resolve omitted entities only from the constrained input, never from prose.
+        if result.intent == Intent.ACCESS_REQUEST and not result.application:
+            result.application = next((key for key in (*APPLICATIONS, "unknown_application") if key in safe.split()), None)
+        if result.intent == Intent.SOFTWARE_INSTALL and not result.software:
+            result.software = next((key for key in (*SOFTWARE, "unapproved_software") if key in safe.split()), None)
+        return validate_agent_response(result, safe)
+    except Exception:
+        raise RuntimeError("Local AI unavailable or returned an invalid response. Please retry.") from None
 
 if __name__ == "__main__":
-
-    conversation_history: list[types.Content] = []
-
+    previous = None
     while True:
-
-        message = input("\nEmployee: ")
-
-        if message.lower() in ["exit", "quit"]:
+        message = input("Employee: ")
+        if message.lower() in {"quit", "exit"}:
             break
-
         try:
-
-            result = process_request(message, conversation_history)
-
-            print("\nAI Agent:")
-            print(
-                result.model_dump_json(indent=2)
-            )
-
-        except RuntimeError as e:
-
-            print("\nAI Agent ERROR:")
-            print(str(e))
+            previous = process_request(message, previous)
+            print(previous.model_dump_json())
+        except (RuntimeError, UnsafeRequest) as error:
+            print(str(error))
