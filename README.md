@@ -2,6 +2,17 @@
 
 Authenticated IT helpdesk prototype using FastAPI, SQLAlchemy/PostgreSQL, React/Vite and local Ollama. The AI classifies requests; backend policy and device ownership determine what can run.
 
+## Recent changes
+
+This implementation preserves the existing backend foundation while completing the local helpdesk workflow, security controls, and agent/device integration. Key updates include:
+
+- Configurable Ollama-based classification with bounded structured outputs, prompt constraints, clarification handling, and validation before actions are dispatched.
+- Stronger authentication and authorization, including PBKDF2 password hashing, legacy bcrypt compatibility, expiring JWTs, server-side admin checks, and protected employee/admin APIs.
+- PostgreSQL-backed request lifecycle, device ownership checks, audit history, policy enforcement, idempotent submissions, and task tracking with safe retry behavior.
+- Endpoint-agent enrollment and task execution with device identity validation, local allowlist checks, simulating install results, and result idempotency protections.
+- React/Vite frontend for registration, login, device enrollment, request submission, policy review, admin dashboard, and status polling.
+- End-to-end demo and verification scripts for local PostgreSQL/Ollama validation without modifying production credentials.
+
 ## What works
 
 - Employee registration, password hashing (PBKDF2-SHA256; existing bcrypt hashes supported), expiring JWTs and server-side employee/admin authorization.
