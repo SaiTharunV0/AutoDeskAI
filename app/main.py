@@ -48,6 +48,16 @@ async def lifespan(app):
 app = FastAPI(title="AutoDeskAI", version="1.0.0", lifespan=lifespan,
     description="Authenticated, policy-controlled IT workflows integrated with Entra ID and Jira.")
 
+@app.middleware("http")
+async def strip_api_prefix(request: Request, call_next):
+    path = request.scope["path"]
+    if path == "/api" or path.startswith("/api/"):
+        request.scope["path"] = path[4:] or "/"
+        raw_path = request.scope.get("raw_path")
+        if raw_path is not None:
+            request.scope["raw_path"] = raw_path[4:] or b"/"
+    return await call_next(request)
+
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
     # Pydantic's default error body can echo input, including submitted passwords.

@@ -66,6 +66,8 @@ class WorkflowTests(unittest.TestCase):
         self.client.get("/agent/heartbeat", headers=data["headers"])
         return data
     def test_authentication_and_rbac(self):
+        self.assertEqual(self.client.get("/api/").json()["message"], "AutoDeskAI Backend is running")
+        self.assertEqual(self.client.get("/api/requests").status_code, 401)
         self.assertEqual(self.client.get("/requests").status_code, 401)
         self.assertEqual(self.client.get("/admin/users", headers=self.headers()).status_code, 403)
         self.assertEqual(self.client.get("/admin/users", headers=self.headers(self.admin)).status_code, 200)

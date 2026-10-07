@@ -95,6 +95,14 @@ Python 3.11+, PostgreSQL, Node.js 20.19+ or 22.12+, and Ollama with a locally in
 
    Wait for its first heartbeat before submitting an installation. Admins can disable devices; disabled device tokens are rejected. Non-loopback agent connections require HTTPS. Installs use the fixed `Microsoft.VisualStudioCode` and `Google.Chrome` winget package IDs and verify the installed executable before completion. Set `AGENT_SIMULATION_MODE=true` only for a no-change development run.
 
+## Deploy on Vercel
+
+The root `vercel.json` defines two services: the FastAPI app (`app`) and the Vite site (`frontend`). Public `/api/*` requests route to FastAPI, `/agent/*` remains public for enrolled endpoint agents, and all other paths route to the frontend. FastAPI strips the `/api` prefix before route matching; the Vite development proxy already strips it locally. No Vercel service bindings are configured because the browser calls the public API route, endpoint agents call the public agent route, and the backend's database, Ollama, Entra, and Jira dependencies are external services.
+
+Configure the Vercel project's environment variables before deploying: `DATABASE_URL` must point to a reachable managed PostgreSQL database, `JWT_SECRET_KEY` must be a strong private value, and `OLLAMA_HOST` must be an HTTPS Ollama-compatible endpoint reachable from Vercel. Configure the Entra and Jira variables described above when those workflows are enabled. Do not use localhost URLs for deployed dependencies. Set the endpoint agent's `SERVER_URL` to the deployed site's origin; it continues to call `/agent/*` on that origin. The endpoint agent itself is installed and run on the enrolled Windows device, not deployed as a Vercel service.
+
+Vercel deployment does not provide PostgreSQL or an Ollama model automatically. Verify that the selected Vercel plan/runtime supports the Python app's dependencies and timeouts, and run the application tests against the deployed environment before enabling real account or endpoint operations.
+
 ## Demonstrate the three workflows
 
 - Sign in as the dedicated test account and submit **I forgot my password.** Start Microsoft's hosted recovery, complete the tenant's MFA/SSPR checks, return to AutoDeskAI, and verify. The app confirms the change through Microsoft Graph without receiving the new password.
