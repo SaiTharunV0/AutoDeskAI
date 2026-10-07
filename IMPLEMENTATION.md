@@ -1,36 +1,29 @@
-# Implementation and verification report
+# Service implementation and validation
 
-## Existing implementation preserved
-The backend branch contained a User model, basic user routes, JWT login, an Ollama migration in progress, intent schemas and validation. Local modifications were present before work began. Those changes were incorporated; no branch reset or checkout was performed. No React source existed in either the working tree or origin/frontend. Existing tests and documentation still targeted Gemini.
+## Implemented services
 
-## Files and changes
-- `agent.py`, `config.py`, `prompts.py`, `schema.py`, `validator.py`: configurable Ollama, bounded structured output, constrained input, clarification, target extraction and validation.
-- `auth.py`: strong password hashes, legacy bcrypt verification, expiring JWTs, current-user/admin dependencies.
-- `app/database.py`, `app/models.py`: environment-based PostgreSQL configuration and seven additional related tables, preserving existing users.
-- `app/main.py`, `app/schemas.py`, `app/workflows.py`, `app/catalog.py`: protected APIs, backend policy, request/task lifecycle, audit history, idempotency, ownership and device authentication.
-- `app/manage.py`: explicit local administrator bootstrap.
-- `endpoint_agent/`: configuration, API client, polling, device verification, fixed allowlist, simulation installer and result retry.
-- `frontend/`: React/Vite employee and administrator application, in-memory JWT handling, status polling, policies, device enrollment and one-time masked agent token.
-- `test.py`: isolated authentication, AI, security and workflow regressions.
-- `demo_e2e.py`, `check_services.py`: live workflow and dependency verification.
-- `requirements.txt`, `frontend/package-lock.json`, `.env.example`, `.gitignore`, `README.md`: dependencies, configuration, exclusions and run instructions.
+- **Password change:** a dedicated Entra test account signs in through MSAL; FastAPI confirms the Graph `/me` identity and calls the delegated `/me/changePassword` API. Password values are submitted outside chat, held only in memory, and excluded from request/audit records.
+- **Password reset:** AutoDeskAI starts Microsoft's hosted SSPR page. The user completes the tenant's MFA/recovery flow there; FastAPI verifies the dedicated account's Entra `lastPasswordChangeDateTime` before completing the request.
+- **Software installation:** registered Windows agents run fixed winget package IDs for VS Code or Chrome, then verify the expected executable before reporting completion. Real mode is the default; simulation is an explicit development option.
+- **Jira access:** the configured Jira test account and test project are checked through Jira REST. Only the `Users`, `Developers`, and `Administrators` project roles are supported. Project Admin remains pending until an administrator approves it; the provider verifies the role after provisioning.
+- **Common workflow:** sanitized Ollama intent/role extraction, backend policy and account eligibility, idempotent helpdesk tickets, status transitions, audit events, and frontend status polling/approval actions.
 
-## Database changes
-Added devices, helpdesk_requests, software_tasks, access_requests, audit_logs, software_policies and application_policies. Existing users and their hashes remain intact. Startup creates missing tables and seeds missing demo policies without overwriting existing policy decisions. Raw chat is deliberately not retained. Device tokens are hashed. No password, JWT or agent token is written to audit details.
+## Integration configuration and safety
 
-## APIs and frontend
-The complete API map is in README.md and /docs. Authentication, request/history, password simulation, catalog, owned devices, agent enrollment/heartbeat/tasks/results and administrator views/policy/device management are connected to the React UI. Legacy user routes are now administrator-only; accounts with retained history cannot be deleted.
+Entra Graph IDs/secrets, SSPR test UPN, Jira API credentials, project key, test-account email/account ID, and endpoint-agent credentials are environment configuration only. Entra and Jira actions reject requests outside their configured dedicated test identities. Provider errors do not create success-shaped results. Jira and Graph secrets and password values are not written to PostgreSQL or audit details.
 
-## Verification
-- 21 automated tests passed using isolated SQLite and mocked Ollama responses.
-- Live PostgreSQL + Ollama qwen3:8b: password reset simulation, VS Code task/agent/result, and Tableau backend policy decision all completed.
-- Live PostgreSQL request/audit records, Swagger/OpenAPI, unauthenticated denial, employee/admin separation and command rejection verified.
-- React production build passed. Frontend HTML, transformed React module and API proxy each returned HTTP 200.
-- PostgreSQL and Ollama were already running. FastAPI and Vite were started for verification.
-- Browser visual verification could not run: no browser was connected to the computer-use tool.
-- Test tooling emits one upstream Starlette/httpx deprecation warning; tests pass.
+The workflow schema update is additive: older databases gain `helpdesk_requests.password_started_at` and `access_requests.requested_role` without dropping existing user or request data. Existing policy rows are preserved.
 
-## Run and limitations
-Follow README.md for setup, administrator bootstrap, device enrollment, agent configuration and all three demonstrations. In this workspace the existing Python environment is `..\.venv`.
+## Validation run
 
-Password, application provisioning and installation are simulations, visibly labeled in API responses/UI. Real installation is disabled. The catalog is intentionally restricted to VS Code and Tableau. No production identity provider, external access connector, durable queue, persistent agent journal, rate limiter, or distributed scheduler is included. JWTs expire but have no refresh or immediate user-session revocation flow. Lists are bounded rather than fully paginated. Visual QA remains unverified. Live demo accounts, devices, requests and audit records remain in the development database.
+- `pytest test.py -q`: **26 passed**. Provider HTTP calls and model classification are mocked; tests cover account matching, role allowlisting, SSPR verification, request ownership, approvals, and password/audit separation.
+- `npm run build`: **passed**; MSAL is dynamically split from the main UI bundle.
+- Production dependency audit (`npm audit --omit=dev`): **0 vulnerabilities**.
+- Python Problems check: no errors in the changed Python files.
+- No live Entra/Jira mutation or endpoint installation was run during validation. `demo_e2e.py` defaults to a read-only connectivity check; `--execute` explicitly triggers real VS Code installation and Jira role provisioning against the configured test accounts.
+
+## Operational boundaries
+
+Use Microsoft's hosted SSPR for resets; AutoDeskAI does not collect reset passwords. Password changes require the delegated Graph permission and an HTTPS deployment outside localhost. Jira needs project-role administration permission and must expose the configured dedicated test account's email for account verification. Chrome machine-scope installation requires endpoint administrator privileges. The UI currently provides in-app status polling rather than email/push notifications.
+
+The service remains intentionally limited to two Windows packages and one Jira project. Additional identity providers, applications, and roles require explicit provider and catalog additions. Durable task queues, persistent agent result journals, production rate limiting, and full list pagination are not included.

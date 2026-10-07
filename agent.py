@@ -5,7 +5,7 @@ import config
 from schema import AgentResponse, Intent
 from prompts import SYSTEM_PROMPT
 from validator import validate_agent_response
-from app.catalog import SOFTWARE, APPLICATIONS
+from app.catalog import SOFTWARE, APPLICATIONS, ACCESS_ROLES
 
 class UnsafeRequest(ValueError):
     pass
@@ -22,20 +22,30 @@ def safe_message(text: str) -> str:
     words = re.findall(r"[a-z]+", lowered)
     permitted = {"i", "my", "need", "want", "please", "help", "forgot", "password", "reset",
                  "change", "update", "install", "installed", "setup", "set", "up", "download",
-                 "access", "permission", "grant", "to", "for", "me", "on", "hello", "hi"}
+                 "access", "permission", "grant", "give", "request", "role", "to", "for", "me",
+                 "on", "hello", "hi", "user", "developer", "project", "admin", "administrator"}
     tokens = [word for word in words if word in permitted]
-    for item in SOFTWARE.values():
+    for key, item in SOFTWARE.items():
         if any(re.search(r"\b" + re.escape(alias) + r"\b", lowered) for alias in item["aliases"]):
-            tokens.append("vscode")
+            tokens.append(key)
     for key in APPLICATIONS:
         if re.search(r"\b" + re.escape(key) + r"\b", lowered):
             tokens.append(key)
-    unknown = set(words) - permitted - {"vscode", "vs", "code", "visual", "studio", "tableau",
+    if any(re.search(r"\b" + re.escape(alias) + r"\b", lowered)
+           for alias in ("project admin", "project administrator", "administrator", "admin")):
+        tokens.append("project_admin")
+    elif re.search(r"\bdeveloper\b", lowered):
+        tokens.append("developer")
+    elif re.search(r"\buser\b", lowered):
+        tokens.append("jira_user")
+    recognized = set(SOFTWARE) | set(APPLICATIONS) | set(ACCESS_ROLES)
+    unknown = set(words) - permitted - recognized - {"vs", "code", "visual", "studio", "can", "you", "could", "would",
         "can", "you", "could", "would", "like", "a", "an", "the", "some", "something",
         "software", "application", "app", "system", "computer", "laptop", "device", "it"}
+    unknown -= {"give", "request", "role", "user", "developer", "project", "admin", "administrator"}
     if unknown and any(word in tokens for word in ("install", "installed", "setup", "download")) and "vscode" not in tokens:
         tokens.append("unapproved_software")
-    if unknown and any(word in tokens for word in ("access", "permission", "grant")) and "tableau" not in tokens:
+    if unknown and any(word in tokens for word in ("access", "permission", "grant")) and not set(APPLICATIONS).intersection(tokens):
         tokens.append("unknown_application")
     return " ".join(tokens) or "unspecified request"
 
@@ -43,10 +53,28 @@ def _resolve_pending_clarification(user_message, previous_response=None):
     if previous_response is None or previous_response.intent != Intent.CLARIFICATION:
         return None
     text = previous_response.message.lower()
+    safe = safe_message(user_message).split()
+    if "which jira role" in text:
+        role = next((key for key in ACCESS_ROLES if key in safe), None)
+        if role:
+            return AgentResponse(intent=Intent.ACCESS_REQUEST, application="jira",
+                                 access_role=role, message="Access request identified.")
+        return AgentResponse(intent=Intent.CLARIFICATION,
+                             message="Choose Jira User, Developer, or Project Admin.")
     if "which application" in text:
-        return AgentResponse(intent=Intent.ACCESS_REQUEST, application=user_message.strip(), message="Access request identified.")
+        application = next((key for key in APPLICATIONS if key in safe), None)
+        role = next((key for key in ACCESS_ROLES if key in safe), None)
+        if application:
+            return AgentResponse(intent=Intent.ACCESS_REQUEST, application=application,
+                                 access_role=role, message="Access request identified.")
+        return AgentResponse(intent=Intent.CLARIFICATION, message="Which application do you need access to?")
     if "which software" in text:
-        return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=user_message.strip(), message="Installation request identified.")
+        software = next((key for key in SOFTWARE if key in safe), None)
+        if software:
+            return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=software,
+                                 message="Installation request identified.")
+        return AgentResponse(intent=Intent.CLARIFICATION,
+                             message="Choose Visual Studio Code or Google Chrome.")
     return None
 
 def process_request(user_message: str, previous_response: AgentResponse | None = None) -> AgentResponse:
@@ -72,6 +100,8 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
         # Resolve omitted entities only from the constrained input, never from prose.
         if result.intent == Intent.ACCESS_REQUEST and not result.application:
             result.application = next((key for key in (*APPLICATIONS, "unknown_application") if key in safe.split()), None)
+        if result.intent == Intent.ACCESS_REQUEST and not result.access_role:
+            result.access_role = next((key for key in ACCESS_ROLES if key in safe.split()), None)
         if result.intent == Intent.SOFTWARE_INSTALL and not result.software:
             result.software = next((key for key in (*SOFTWARE, "unapproved_software") if key in safe.split()), None)
         return validate_agent_response(result, safe)

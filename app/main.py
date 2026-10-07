@@ -2,26 +2,39 @@ from contextlib import asynccontextmanager
 import hashlib
 import secrets
 from datetime import timedelta
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text
+from sqlalchemy import select, text, inspect
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import Session
 from app.database import Base, engine, get_db, SessionLocal
 from app.models import *
 from app.schemas import *
-from app.catalog import SOFTWARE, APPLICATIONS
-from app.workflows import audit, owned_request, create_workflow, expire_tasks
+from app.catalog import SOFTWARE, APPLICATIONS, ACCESS_ROLES
+from app.workflows import audit, owned_request, create_workflow, expire_tasks, provision_access
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
 from agent import UnsafeRequest
+from services.password import get_password_service, PasswordIntegrationError
 import config
 
 @asynccontextmanager
 async def lifespan(app):
     validate_config()
     Base.metadata.create_all(engine)  # Additive: existing users schema stays intact.
+    columns = {table: {column["name"] for column in inspect(engine).get_columns(table)}
+               for table in ("helpdesk_requests", "access_requests")}
+    with engine.begin() as connection:
+        if "password_started_at" not in columns["helpdesk_requests"]:
+            connection.execute(text(
+                "ALTER TABLE helpdesk_requests ADD COLUMN password_started_at TIMESTAMP NULL"
+            ))
+        if "requested_role" not in columns["access_requests"]:
+            connection.execute(text(
+                "ALTER TABLE access_requests ADD COLUMN requested_role VARCHAR(40) "
+                "NOT NULL DEFAULT 'jira_user'"
+            ))
     with SessionLocal() as db:
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
@@ -33,7 +46,7 @@ async def lifespan(app):
     yield
 
 app = FastAPI(title="AutoDeskAI", version="1.0.0", lifespan=lifespan,
-    description="Authenticated, policy-controlled IT workflows. Password and access providers are simulated.")
+    description="Authenticated, policy-controlled IT workflows integrated with Entra ID and Jira.")
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
@@ -64,6 +77,12 @@ def database_test(db: Session = Depends(get_db), user=Depends(require_admin)):
 
 @app.post("/auth/register", response_model=UserOut, status_code=201, tags=["Authentication"])
 def register(payload: Register, db: Session = Depends(get_db)):
+    return create_user(payload, db)
+
+def create_user(payload: Register, db: Session, allow_reserved_provider_account=False):
+    reserved = {config.ENTRA_TEST_ACCOUNT_UPN, config.JIRA_TEST_ACCOUNT_EMAIL} - {""}
+    if payload.email in reserved and not allow_reserved_provider_account:
+        raise HTTPException(403, "Provider test accounts must be created by an administrator")
     user = User(name=payload.name.strip(), email=payload.email,
                 password_hash=hash_password(payload.password.get_secret_value()), role="employee")
     db.add(user)
@@ -95,6 +114,11 @@ DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 def me(user=Depends(get_current_user)):
     return user
 
+@app.get("/auth/entra/config", tags=["Authentication"])
+def entra_config(user=Depends(get_current_user)):
+    return {"enabled": bool(config.ENTRA_TENANT_ID and config.ENTRA_CLIENT_ID),
+            "tenant_id": config.ENTRA_TENANT_ID, "client_id": config.ENTRA_CLIENT_ID}
+
 @app.get("/users", response_model=list[UserOut], tags=["Admin"])
 @app.get("/admin/users", response_model=list[UserOut], tags=["Admin"])
 def users(user=Depends(require_admin), db: Session = Depends(get_db)):
@@ -103,7 +127,7 @@ def users(user=Depends(require_admin), db: Session = Depends(get_db)):
 @app.post('/users', response_model=UserOut, status_code=201, tags=['Admin'],
           description='Legacy user creation route, now administrator-only and requires a password.')
 def admin_create_user(payload: Register, user=Depends(require_admin), db: Session = Depends(get_db)):
-    return register(payload, db)
+    return create_user(payload, db, allow_reserved_provider_account=True)
 
 @app.put('/users/{user_id}', response_model=UserOut, tags=['Admin'])
 def update_user(user_id: int, payload: UserUpdate, user=Depends(require_admin), db: Session = Depends(get_db)):
@@ -172,23 +196,165 @@ def history(request_id: int, user=Depends(get_current_user), db: Session = Depen
     return db.scalars(select(AuditLog).where(AuditLog.resource_type == "request",
         AuditLog.resource_id == request_id).order_by(AuditLog.id)).all()
 
-@app.post("/requests/{request_id}/password/confirm", response_model=RequestOut, tags=["Requests"],
-          description="Confirms a simulated identity operation for the authenticated owner. Does not change a real password.")
-def password_confirm(request_id: int, payload: PasswordConfirm, user=Depends(get_current_user),
-                     db: Session = Depends(get_db)):
-    row = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.id == request_id).with_for_update())
+@app.post("/requests/{request_id}/cancel", response_model=RequestOut, tags=["Requests"])
+def cancel_request(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    row = db.scalar(select(HelpdeskRequest).where(
+        HelpdeskRequest.id == request_id
+    ).with_for_update())
     if not row or row.user_id != user.id:
         raise HTTPException(404, "Request not found")
-    if row.intent not in ("PASSWORD_RESET", "PASSWORD_CHANGE"):
-        raise HTTPException(409, "Not a password workflow")
-    if row.status == "COMPLETED":
-        return row
-    if row.status != "PENDING":
-        raise HTTPException(409, "Workflow is not pending")
-    row.status = "COMPLETED"
-    row.message = "Simulated password operation completed. Your actual login password is unchanged."
-    audit(db, user.id, row.intent + "_COMPLETED", "request", row.id, "COMPLETED", "Simulated identity provider")
+    cancellable = row.status == "AWAITING_APPROVAL"
+    if row.intent == "SOFTWARE_INSTALL" and row.status == "PENDING":
+        if not row.task or row.task.status != "PENDING":
+            raise HTTPException(409, "Installation is already being processed")
+        row.task.status = "CANCELLED"
+        row.task.completed_at = now()
+        cancellable = True
+    elif row.intent == "PASSWORD_RESET" and row.status == "PENDING":
+        cancellable = row.password_started_at is None
+    elif row.intent == "PASSWORD_CHANGE" and row.status == "PENDING":
+        cancellable = True
+    if not cancellable:
+        raise HTTPException(409, "Request can no longer be cancelled")
+    row.status = "CANCELLED"
+    row.message = "Request cancelled before execution."
+    if row.access:
+        row.access.status = "CANCELLED"
+        row.access.decision_reason = row.message
+    audit(db, user.id, "REQUEST_CANCELLED", "request", row.id, "CANCELLED")
     db.commit()
+    db.refresh(row)
+    return row
+
+@app.post("/admin/requests/{request_id}/approval", response_model=RequestOut, tags=["Admin"])
+def access_approval(request_id: int, payload: ApprovalIn, user=Depends(require_admin),
+                    db: Session = Depends(get_db)):
+    row = db.scalar(select(HelpdeskRequest).where(
+        HelpdeskRequest.id == request_id
+    ).with_for_update())
+    if not row or row.intent != "ACCESS_REQUEST" or not row.access:
+        raise HTTPException(404, "Access request not found")
+    if row.status != "AWAITING_APPROVAL":
+        raise HTTPException(409, "Access request is not awaiting approval")
+    if not payload.approved:
+        row.status = row.access.status = "REJECTED"
+        row.message = row.access.decision_reason = "Project Admin access was rejected by an administrator."
+        audit(db, user.id, "ACCESS_APPROVAL_REJECTED", "request", row.id, "REJECTED")
+        db.commit()
+        db.refresh(row)
+        return row
+    policy = db.get(ApplicationPolicy, row.access.application)
+    request_user = db.get(User, row.user_id)
+    if (not policy or not policy.enabled or not request_user or
+            request_user.email.lower() != config.JIRA_TEST_ACCOUNT_EMAIL or
+            (policy.required_role != "employee" and request_user.role != "admin")):
+        row.status = row.access.status = "REJECTED"
+        row.message = row.access.decision_reason = "Jira access policy or test-account eligibility changed."
+        audit(db, user.id, "ACCESS_APPROVAL_REJECTED", "request", row.id, "REJECTED",
+              "Eligibility or policy recheck failed")
+        db.commit()
+        db.refresh(row)
+        return row
+    audit(db, user.id, "ACCESS_APPROVED", "request", row.id, "APPROVED",
+          row.access.requested_role)
+    db.commit()
+    return provision_access(db, row, row.access, user.id)
+
+def _owned_password_request(request_id, user, db, intent):
+    row = db.scalar(select(HelpdeskRequest).where(
+        HelpdeskRequest.id == request_id
+    ).with_for_update())
+    if not row or row.user_id != user.id:
+        raise HTTPException(404, "Request not found")
+    if row.intent != intent:
+        raise HTTPException(409, "Not the requested password workflow")
+    if not config.ENTRA_TEST_ACCOUNT_UPN or user.email.lower() != config.ENTRA_TEST_ACCOUNT_UPN:
+        raise HTTPException(403, "Only the configured Entra test account can use this workflow")
+    if row.status != "PENDING":
+        raise HTTPException(409, "Password workflow is not pending")
+    return row
+
+@app.post("/requests/{request_id}/password/reset/start", response_model=PasswordActionOut, tags=["Requests"],
+          description="Starts Microsoft's hosted SSPR flow. AutoDeskAI never receives the new password.")
+def password_reset_start(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _owned_password_request(request_id, user, db, "PASSWORD_RESET")
+    try:
+        redirect_url = get_password_service().reset_url()
+    except PasswordIntegrationError as error:
+        audit(db, user.id, "PASSWORD_RESET_START_FAILED", "request", row.id, "FAILED",
+              "Entra SSPR configuration unavailable")
+        db.commit()
+        raise HTTPException(503, str(error)) from None
+    if row.password_started_at:
+        return PasswordActionOut(request=row, redirect_url=redirect_url)
+    row.password_started_at = now()
+    row.message = "Complete Microsoft's recovery/MFA flow, then return here to verify the reset."
+    audit(db, user.id, "PASSWORD_RESET_STARTED", "request", row.id, "PENDING", "Microsoft-hosted SSPR")
+    db.commit()
+    db.refresh(row)
+    return PasswordActionOut(request=row, redirect_url=redirect_url)
+
+@app.post("/requests/{request_id}/password/reset/verify", response_model=PasswordActionOut,
+          tags=["Requests"], description="Verifies SSPR completion from Entra's password-change timestamp.")
+def password_reset_verify(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _owned_password_request(request_id, user, db, "PASSWORD_RESET")
+    if not row.password_started_at:
+        raise HTTPException(409, "Start the Microsoft-hosted recovery flow first")
+    try:
+        verified = get_password_service().verify_reset(row.password_started_at)
+    except PasswordIntegrationError as error:
+        audit(db, user.id, "PASSWORD_RESET_VERIFICATION_FAILED", "request", row.id, "FAILED",
+              "Entra verification unavailable")
+        db.commit()
+        raise HTTPException(503, str(error)) from None
+    if verified:
+        row.status = "COMPLETED"
+        row.message = "Microsoft Entra confirmed the password reset."
+        audit(db, user.id, "PASSWORD_RESET_COMPLETED", "request", row.id, "COMPLETED",
+              "Entra password-change timestamp verified")
+    else:
+        row.message = "Reset not yet verified. Complete the Microsoft flow, then retry verification."
+        audit(db, user.id, "PASSWORD_RESET_VERIFICATION_PENDING", "request", row.id, "PENDING")
+    db.commit()
+    db.refresh(row)
+    return PasswordActionOut(request=row, verified=verified)
+
+@app.post("/requests/{request_id}/password/change", response_model=RequestOut, tags=["Requests"],
+          description="Changes the dedicated Entra test account password using delegated Graph access.")
+def password_change(request_id: int, payload: PasswordChangeIn,
+                    entra_access_token: str = Header(alias="X-Entra-Access-Token", min_length=1),
+                    user=Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _owned_password_request(request_id, user, db, "PASSWORD_CHANGE")
+    current_password = payload.current_password.get_secret_value()
+    new_password = payload.new_password.get_secret_value()
+    if current_password == new_password:
+        raise HTTPException(422, "The new password must differ from the current password")
+    row.status = "PROCESSING"
+    row.message = "Microsoft Entra is processing the password change."
+    audit(db, user.id, "PASSWORD_CHANGE_STARTED", "request", row.id, "PROCESSING")
+    db.commit()
+    try:
+        get_password_service().change_password(entra_access_token, current_password, new_password)
+    except PermissionError as error:
+        row.status = "FAILED"
+        row.message = "Microsoft Entra did not authorize the password change."
+        audit(db, user.id, "PASSWORD_CHANGE_REJECTED", "request", row.id, "FAILED",
+              "Entra identity did not match the configured test account")
+        db.commit()
+        raise HTTPException(403, str(error)) from None
+    except PasswordIntegrationError as error:
+        row.status = "FAILED"
+        row.message = "Microsoft Entra could not confirm the password change."
+        audit(db, user.id, "PASSWORD_CHANGE_FAILED", "request", row.id, "FAILED",
+              "Entra rejected the password change or verification failed")
+        db.commit()
+        raise HTTPException(502, str(error)) from None
+    row.status = "COMPLETED"
+    row.message = "Microsoft Entra confirmed the password change."
+    audit(db, user.id, "PASSWORD_CHANGE_COMPLETED", "request", row.id, "COMPLETED",
+          "Delegated Entra Graph response confirmed")
+    db.commit()
+    db.refresh(row)
     return row
 
 @app.get("/devices", response_model=list[DeviceOut], tags=["Devices"])
@@ -261,19 +427,36 @@ def task_result(task_id: int, payload: ResultIn, device=Depends(current_device),
     if not task:
         raise HTTPException(404, "Task not found")
     status = "COMPLETED" if payload.success else "FAILED"
-    result = ("Simulated installation completed; no OS changes made." if payload.success else "Endpoint installation failed.")
-    if not payload.simulated:
-        raise HTTPException(400, "This prototype accepts simulation results only")
+    result = (
+        f"Simulated installation completed; no OS changes made."
+        if payload.success and payload.simulated
+        else f"{SOFTWARE[task.software]['display_name']} installation verified on endpoint."
+        if payload.success
+        else "Simulated installation failed; no OS changes made."
+        if payload.simulated
+        else "Endpoint installation failed or could not be verified."
+    )
     if task.status in ("COMPLETED", "FAILED"):
         if task.status == status and task.result == result:
             return task
         raise HTTPException(409, "Task already finalized")
-    if task.status != "PROCESSING":
+    if task.status == "VERIFYING":
+        if task.result != result:
+            raise HTTPException(409, "Conflicting endpoint result during verification")
+    elif task.status == "PROCESSING":
+        task.status = task.request.status = "VERIFYING"
+        task.result = result
+        task.request.message = "Endpoint result received; verifying the installation report."
+        audit(db, task.request.user_id, "SOFTWARE_INSTALL_VERIFYING", "request",
+              task.request_id, "VERIFYING", "Authenticated owning device report")
+        db.commit()
+    else:
         raise HTTPException(409, "Task was not dispatched")
     task.status = task.request.status = status
     task.result = task.request.message = result
     task.completed_at = now()
-    audit(db, task.request.user_id, "SOFTWARE_INSTALL_" + status, "request", task.request_id, status, "Simulation")
+    audit(db, task.request.user_id, "SOFTWARE_INSTALL_" + status, "request", task.request_id,
+          status, "Simulation" if payload.simulated else "Endpoint result")
     db.commit()
     return task
 
@@ -299,7 +482,9 @@ def audit_logs(user=Depends(require_admin), db: Session = Depends(get_db)):
 def catalog(user=Depends(get_current_user), db: Session = Depends(get_db)):
     return {"software": [{"key": p.key, "display_name": SOFTWARE[p.key]["display_name"], "enabled": p.enabled}
                         for p in db.scalars(select(SoftwarePolicy)) if p.key in SOFTWARE],
-            "applications": [{"key": p.key, "enabled": p.enabled, "required_role": p.required_role}
+            "applications": [{"key": p.key, "enabled": p.enabled, "required_role": p.required_role,
+                              "roles": [{"key": key, "display_name": role["display_name"]}
+                                        for key, role in ACCESS_ROLES.items()]}
                         for p in db.scalars(select(ApplicationPolicy)) if p.key in APPLICATIONS]}
 
 @app.put("/admin/software/{key}", tags=["Admin"])

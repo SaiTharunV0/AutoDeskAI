@@ -4,9 +4,9 @@ import time
 import httpx
 from endpoint_agent import config
 from endpoint_agent.api import AgentAPI
-from endpoint_agent.installer import install
+from endpoint_agent.installer import install, InstallationError
 
-def run_once(api, device_id, simulation=True, pending=None):
+def run_once(api, device_id, simulation=False, pending=None):
     pending = pending if pending is not None else {}
     device = api.heartbeat()
     if device["device_id"] != device_id:
@@ -20,8 +20,8 @@ def run_once(api, device_id, simulation=True, pending=None):
             raise ValueError("Task does not belong to this registered device")
         try:
             result = install(task["software"], simulation)
-        except ValueError:
-            result = {"success": False, "simulated": True}
+        except (ValueError, InstallationError):
+            result = {"success": False, "simulated": simulation}
         pending[task["id"]] = result
         api.report(task["id"], result)
         del pending[task["id"]]

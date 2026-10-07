@@ -59,16 +59,30 @@ class TaskOut(BaseModel):
     status: str
     result: str | None
 
+class AccessOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    requested_role: str
+    status: str
+    decision_reason: str
+
 class RequestOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     user_id: int
     intent: str
+    original_message: str
     status: str
     message: str
     created_at: datetime
     updated_at: datetime
     task: TaskOut | None
+    access: AccessOut | None
+    password_started_at: datetime | None
+
+class PasswordActionOut(BaseModel):
+    request: RequestOut
+    redirect_url: str | None = None
+    verified: bool = False
 
 class DeviceIn(Input):
     device_id: str = Field(min_length=3, max_length=100, pattern=r"^[a-zA-Z0-9_.-]+$")
@@ -92,7 +106,7 @@ class DeviceEnrollment(BaseModel):
 
 class ResultIn(Input):
     success: bool
-    simulated: bool = True
+    simulated: bool = False
 
 class PolicyIn(Input):
     enabled: bool
@@ -101,8 +115,12 @@ class PolicyIn(Input):
 class DeviceState(Input):
     status: Literal["ACTIVE", "DISABLED"]
 
-class PasswordConfirm(Input):
-    confirm_simulation: Literal[True]
+class PasswordChangeIn(Input):
+    current_password: SecretStr = Field(min_length=1, max_length=256)
+    new_password: SecretStr = Field(min_length=12, max_length=256)
+
+class ApprovalIn(Input):
+    approved: bool
 
 class AuditOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

@@ -19,6 +19,7 @@ class AgentResponse(BaseModel):
 
     software: Optional[str] = Field(default=None, max_length=80)
     application: Optional[str] = Field(default=None, max_length=80)
+    access_role: Optional[str] = Field(default=None, max_length=40)
 
     message: str = Field(max_length=500)
 
