@@ -1,5 +1,4 @@
 from schema import AgentResponse, Intent
-from app.catalog import ACCESS_ROLES
 
 
 def _contains_action(text: str, actions: tuple[str, ...]) -> bool:
@@ -29,17 +28,6 @@ def validate_agent_response(
             )
             return result
 
-        if (not result.access_role or result.access_role not in ACCESS_ROLES
-                or result.access_role not in user_message.split()):
-            result.access_role = next(
-                (role for role in ACCESS_ROLES if role in user_message.split()), None
-            )
-            if not result.access_role:
-                result.intent = Intent.CLARIFICATION
-                result.application = None
-                result.message = "Which Jira role do you need: Jira User, Developer, or Project Admin?"
-                return result
-
     if result.intent == Intent.SOFTWARE_INSTALL and user_message:
         if not _contains_action(
             user_message,
@@ -66,28 +54,20 @@ def validate_agent_response(
         if not result.application:
             result.intent = Intent.CLARIFICATION
             result.message = "Which application do you need access to?"
-        if result.access_role not in ACCESS_ROLES:
-            result.intent = Intent.CLARIFICATION
-            result.application = None
-            result.access_role = None
-            result.message = "Which Jira role do you need: Jira User, Developer, or Project Admin?"
 
     elif result.intent == Intent.PASSWORD_CHANGE:
 
         result.software = None
         result.application = None
-        result.access_role = None
 
     elif result.intent == Intent.PASSWORD_RESET:
 
         result.software = None
         result.application = None
-        result.access_role = None
 
     elif result.intent == Intent.CHAT:
 
         result.software = None
         result.application = None
-        result.access_role = None
 
     return result

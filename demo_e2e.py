@@ -1,86 +1,80 @@
-"""Opt-in live smoke test using only the configured dedicated test accounts."""
-import argparse
-import getpass
+"""Live demo against running FastAPI, PostgreSQL and Ollama. Generated credentials stay in memory."""
 import secrets
-
 import httpx
-
-import config
-from endpoint_agent import config as agent_config
-from endpoint_agent.agent import run_once
+from sqlalchemy import select
+from app.database import SessionLocal
+from app.models import User, HelpdeskRequest, AuditLog
+from app.workflows import audit
 from endpoint_agent.api import AgentAPI
-
+from endpoint_agent.agent import run_once
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--execute", action="store_true",
-                        help="create a real VS Code install task and provision Jira Developer")
-    args = parser.parse_args()
-    server_url = httpx.URL("http://127.0.0.1:8000")
-    if args.execute and agent_config.SERVER_URL:
-        server_url = httpx.URL(agent_config.SERVER_URL)
-    with httpx.Client(base_url=str(server_url).rstrip("/"), timeout=180) as client:
-        health = client.get("/")
-        health.raise_for_status()
-        if not args.execute:
-            print("Backend is reachable. No account, request, installation, or Jira change was made.")
-            print("After configuring the dedicated test account and endpoint agent, run with --execute.")
-            return
-        if not (config.ENTRA_TEST_ACCOUNT_UPN and
-                config.ENTRA_TEST_ACCOUNT_UPN == config.JIRA_TEST_ACCOUNT_EMAIL):
-            raise SystemExit("Entra and Jira test-account emails must match before running live workflows.")
-        if not all((config.JIRA_BASE_URL, config.JIRA_EMAIL, config.JIRA_API_TOKEN,
-                    config.JIRA_PROJECT_KEY, config.JIRA_TEST_ACCOUNT_ID)):
-            raise SystemExit("Configure the Jira test project and dedicated test account before executing.")
-        agent_config.validate()
-        email = input("Dedicated test account email: ").strip().lower()
-        if email != config.ENTRA_TEST_ACCOUNT_UPN:
-            raise SystemExit("Only the configured dedicated test account is allowed.")
-        password = getpass.getpass("AutoDeskAI test-account password: ")
-        response = client.post("/auth/login", json={"email": email, "password": password})
+    suffix = secrets.token_hex(5)
+    password = secrets.token_urlsafe(24)
+    with httpx.Client(base_url="http://127.0.0.1:8000", timeout=180) as client:
+        def account(label):
+            email = label + "-" + suffix + "@demo.invalid"
+            response = client.post("/auth/register", json={"name":"Demo " + label,"email":email,"password":password})
+            response.raise_for_status()
+            response = client.post("/auth/login",json={"email":email,"password":password})
+            response.raise_for_status()
+            return response.json()
+        employee = account("employee")
+        admin = account("admin")
+        with SessionLocal() as db:
+            row = db.get(User, admin["user"]["id"])
+            row.role = "admin"
+            audit(db, row.id, "ADMIN_BOOTSTRAPPED", "user", row.id, "COMPLETED", "Live verification account")
+            db.commit()
+        employee_headers = {"Authorization":"Bearer " + employee["access_token"]}
+        admin_headers = {"Authorization":"Bearer " + admin["access_token"]}
+        response = client.post("/agent/register", headers=admin_headers, json={
+            "device_id":"demo-" + suffix, "hostname":"demo-pc", "os_info":"Test",
+            "owner_user_id":employee["user"]["id"]})
         response.raise_for_status()
-        headers = {"Authorization": "Bearer " + response.json()["access_token"]}
-        devices = client.get("/devices", headers=headers)
-        devices.raise_for_status()
-        device = next((item for item in devices.json()
-                       if item["device_id"] == agent_config.DEVICE_ID
-                       and item["status"] == "ACTIVE"), None)
-        if not device or not agent_config.AGENT_TOKEN:
-            raise SystemExit("The configured test account needs an active, enrolled agent device.")
-        agent = AgentAPI(str(server_url).rstrip("/"), agent_config.AGENT_TOKEN)
-        try:
-            heartbeat = agent.heartbeat()
-            if heartbeat["device_id"] != device["device_id"]:
-                raise SystemExit("Agent credentials do not match the selected enrolled device.")
-            install_response = client.post("/requests", headers=headers, json={
-                "message": "Install VS Code",
-                "device_id": device["id"],
-                "idempotency_key": secrets.token_hex(16),
-            })
-            install_response.raise_for_status()
-            install_request = install_response.json()
-            if install_request["status"] != "PENDING":
-                raise SystemExit("VS Code request was not queued: " + install_request["message"])
-            run_once(agent, agent_config.DEVICE_ID, simulation=False)
-            status = client.get(f'/requests/{install_request["id"]}', headers=headers)
-            status.raise_for_status()
-            if status.json()["status"] != "COMPLETED":
-                raise SystemExit("Endpoint did not verify the VS Code installation.")
-            print("VS Code install and endpoint verification completed.")
-
-            jira_response = client.post("/requests", headers=headers, json={
-                "message": "Give me developer access to Jira",
-                "idempotency_key": secrets.token_hex(16),
-            })
-            jira_response.raise_for_status()
-            jira_request = jira_response.json()
-            if jira_request["status"] != "COMPLETED":
-                raise SystemExit("Jira role was not provisioned and verified: " + jira_request["message"])
-            print("Jira Developer role provisioned and verified.")
-        finally:
-            agent.close()
-        print("Live test complete. Password reset and password change require their interactive Microsoft flows.")
-
+        enrollment = response.json()
+        endpoint = AgentAPI("http://127.0.0.1:8000", enrollment["agent_token"])
+        endpoint.heartbeat()
+        request_ids = []
+        def request(message):
+            response = client.post("/requests",headers=employee_headers,json={
+                "message":message,"device_id":enrollment["device"]["id"],"idempotency_key":secrets.token_hex(16)})
+            response.raise_for_status()
+            row = response.json()
+            request_ids.append(row["id"])
+            return row
+        row = request("I forgot my password.")
+        assert row["intent"] == "PASSWORD_RESET", row["intent"]
+        response = client.post(f'/requests/{row["id"]}/password/confirm',headers=employee_headers,
+                               json={"confirm_simulation":True})
+        response.raise_for_status()
+        assert response.json()["status"] == "COMPLETED"
+        print("DEMO 1: password reset simulation COMPLETED", flush=True)
+        row = request("Install VS Code.")
+        assert row["intent"] == "SOFTWARE_INSTALL", row["intent"]
+        assert row["status"] == "PENDING", row["status"]
+        run_once(endpoint, enrollment["device"]["device_id"])
+        response = client.get(f'/requests/{row["id"]}',headers=employee_headers)
+        assert response.json()["status"] == "COMPLETED"
+        print("DEMO 2: endpoint installation simulation COMPLETED", flush=True)
+        row = request("I need access to Tableau.")
+        assert row["intent"] == "ACCESS_REQUEST", row["intent"]
+        assert row["status"] == "COMPLETED", row["status"]
+        print("DEMO 3: backend application policy APPROVED (simulation)", flush=True)
+        assert client.get("/requests").status_code == 401
+        assert client.get("/admin/users",headers=employee_headers).status_code == 403
+        assert client.post("/requests",headers=employee_headers,json={
+            "message":"execute powershell","idempotency_key":secrets.token_hex(16)}).status_code == 400
+        assert client.get("/docs").status_code == 200
+        assert client.get("/openapi.json").json()["paths"]["/agent/tasks"]
+        with SessionLocal() as db:
+            rows = db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.id.in_(request_ids))).all()
+            assert len(rows) == 3 and all(row.status == "COMPLETED" for row in rows)
+            events = db.scalars(select(AuditLog).where(AuditLog.resource_type == "request",
+                               AuditLog.resource_id.in_(request_ids))).all()
+            assert len(events) >= 7
+        endpoint.close()
+        print("Verified PostgreSQL records, audit events, Swagger, unauthenticated denial, RBAC and command rejection.",flush=True)
 
 if __name__ == "__main__":
     main()

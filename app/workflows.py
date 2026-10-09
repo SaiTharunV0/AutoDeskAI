@@ -3,17 +3,14 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from app.models import (HelpdeskRequest, SoftwareTask, AccessRequest, AuditLog, Device,
                         SoftwarePolicy, ApplicationPolicy, now)
-from app.catalog import SOFTWARE, APPLICATIONS, ACCESS_ROLES, software_key
+from app.catalog import SOFTWARE, APPLICATIONS, software_key
 from schema import AgentResponse, Intent
 from agent import process_request, safe_message, UnsafeRequest
-from services.access import AccessIntegrationError, get_access_service
 import config
-
 
 def audit(db, user_id, action, resource_type, resource_id, status, details=""):
     db.add(AuditLog(user_id=user_id, action=action, resource_type=resource_type,
                     resource_id=resource_id, status=status, details=details))
-
 
 def owned_request(db, request_id, user):
     request = db.get(HelpdeskRequest, request_id)
@@ -21,12 +18,10 @@ def owned_request(db, request_id, user):
         raise HTTPException(404, "Request not found")
     return request
 
-
 def expire_tasks(db):
     cutoff = now() - timedelta(seconds=config.TASK_TIMEOUT_SECONDS)
     tasks = db.scalars(select(SoftwareTask).where(
-        SoftwareTask.status.in_(["PENDING", "PROCESSING", "VERIFYING"]),
-        SoftwareTask.created_at < cutoff
+        SoftwareTask.status.in_(["PENDING", "PROCESSING"]), SoftwareTask.created_at < cutoff
     ).with_for_update()).all()
     for task in tasks:
         task.status = task.request.status = "FAILED"
@@ -34,34 +29,6 @@ def expire_tasks(db):
         task.completed_at = now()
         audit(db, task.request.user_id, "SOFTWARE_INSTALL_FAILED", "request", task.request_id, "FAILED", "Task timeout")
     db.commit()
-
-
-def provision_access(db, request, access, actor_id):
-    request.status = access.status = "PROCESSING"
-    request.message = access.decision_reason = "Jira is assigning the predefined project role."
-    audit(db, actor_id, "ACCESS_PROVISIONING_STARTED", "request", request.id, "PROCESSING")
-    db.commit()
-    try:
-        verified = get_access_service(access.application).provision(access.requested_role)
-    except AccessIntegrationError:
-        verified = False
-    if verified:
-        request.status = access.status = "COMPLETED"
-        request.message = access.decision_reason = (
-            f"{ACCESS_ROLES[access.requested_role]['display_name']} access was verified in Jira."
-        )
-        audit(db, actor_id, "ACCESS_GRANTED", "request", request.id, "COMPLETED", access.requested_role)
-    else:
-        request.status = access.status = "FAILED"
-        request.message = access.decision_reason = (
-            "Jira did not confirm the requested project role. Contact your administrator before retrying."
-        )
-        audit(db, actor_id, "ACCESS_PROVISIONING_FAILED", "request", request.id, "FAILED",
-              "Provider error or role verification failed")
-    db.commit()
-    db.refresh(request)
-    return request
-
 
 def create_workflow(db, user, payload):
     existing = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.user_id == user.id,
@@ -92,13 +59,12 @@ def create_workflow(db, user, payload):
     db.flush()
     if result.intent in (Intent.PASSWORD_CHANGE, Intent.PASSWORD_RESET):
         request.status = "PENDING"
-        request.message = ("Continue to Microsoft Entra self-service password reset."
-                           if result.intent == Intent.PASSWORD_RESET
-                           else "Change your password using the dedicated Entra test account.")
+        request.message = "Confirm the simulated password workflow. No identity-provider password will change."
         audit(db, user.id, result.intent.value + "_REQUESTED", "request", request.id, "PENDING")
     elif result.intent == Intent.SOFTWARE_INSTALL:
         key = software_key(result.software)
         policy = db.get(SoftwarePolicy, key) if key else None
+        # Even a fabricated model response cannot select a target absent from input.
         if not key or key not in safe.split() or not policy or not policy.enabled:
             request.status, request.message = "REJECTED", "Software is not approved."
         else:
@@ -113,56 +79,32 @@ def create_workflow(db, user, payload):
         audit(db, user.id, "SOFTWARE_INSTALL_REQUESTED", "request", request.id, request.status)
     elif result.intent == Intent.ACCESS_REQUEST:
         key = (result.application or "").strip().lower()
-        role_key = (result.access_role or "").strip().lower()
         policy = db.get(ApplicationPolicy, key) if key in APPLICATIONS else None
-        valid_target = key in safe.split() and role_key in ACCESS_ROLES and role_key in safe.split()
-        eligible = bool(policy and policy.enabled and
-                        (policy.required_role == "employee" or user.role == "admin"))
-        test_account = bool(config.JIRA_TEST_ACCOUNT_EMAIL and
-                            user.email.lower() == config.JIRA_TEST_ACCOUNT_EMAIL)
-        if not valid_target or not eligible or not test_account:
-            request.status = "REJECTED"
-            request.message = ("Only the configured Jira test account is eligible for access provisioning."
-                               if not test_account else "Application or role access rejected by backend policy.")
-            access_status = "REJECTED"
-        elif role_key == "project_admin":
-            request.status = access_status = "AWAITING_APPROVAL"
-            request.message = "Project Admin access requires administrator approval."
-        else:
-            request.status, access_status = "PENDING", "PENDING"
-            request.message = "Jira role request validated; provisioning will start now."
-        decision = request.message
-        access = AccessRequest(request_id=request.id, user_id=user.id,
-            application=key if key in APPLICATIONS else "unknown",
-            requested_role=role_key if role_key in ACCESS_ROLES else "jira_user",
-            status=access_status, decision_reason=decision)
-        db.add(access)
-        audit(db, user.id, "ACCESS_REQUESTED", "request", request.id, request.status)
-        if request.status == "REJECTED":
-            audit(db, user.id, "ACCESS_REJECTED", "request", request.id, "REJECTED")
-        elif request.status == "AWAITING_APPROVAL":
-            audit(db, user.id, "ACCESS_AWAITING_APPROVAL", "request", request.id, request.status)
-        else:
-            db.flush()
-            db.commit()
-            db.refresh(access)
-            return provision_access(db, request, access, user.id)
+        allowed = bool(key in safe.split() and policy and policy.enabled and
+                       (policy.required_role == "employee" or user.role == "admin"))
+        request.status = "COMPLETED" if allowed else "REJECTED"
+        request.message = ("Access approved in the demo policy service; no external application was provisioned."
+                           if allowed else "Application access rejected by backend policy.")
+        db.add(AccessRequest(request_id=request.id, user_id=user.id,
+            application=key if key in APPLICATIONS else "unknown", status=request.status,
+            decision_reason=request.message))
+        audit(db, user.id, "ACCESS_REQUESTED", "request", request.id, "PENDING")
+        audit(db, user.id, "ACCESS_GRANTED" if allowed else "ACCESS_REJECTED", "request", request.id, request.status)
     elif result.intent == Intent.CLARIFICATION:
         request.status = "NEEDS_CLARIFICATION"
+        # Never relay arbitrary model prose or credentials back into history.
         if result.message == "Please request one workflow at a time.":
             request.message = result.message
-        elif "jira role" in result.message.lower():
-            request.message = "Which Jira role do you need: Jira User, Developer, or Project Admin?"
-        elif "jira" in safe or "access" in safe:
-            request.message = "Which Jira role do you need: Jira User, Developer, or Project Admin?"
+        elif "access" in safe or (previous and "application" in previous.message):
+            request.message = "Which application do you need access to? Supported: Tableau."
         elif any(word in safe.split() for word in ("install", "installed", "setup", "download")):
-            request.message = "Which software would you like to install? Supported: Visual Studio Code and Google Chrome."
+            request.message = "Which software would you like to install? Supported: Visual Studio Code."
         else:
-            request.message = "Please specify password change/reset, software installation, or Jira access and a predefined role."
+            request.message = "Please specify password change/reset, software installation, or application access."
         audit(db, user.id, "CLARIFICATION_REQUESTED", "request", request.id, request.status)
     else:
         request.status = "COMPLETED"
-        request.message = "I can help with Entra password change/reset, approved software installation, and Jira access."
+        request.message = "I can help with password change/reset, approved software installation, and application access."
         audit(db, user.id, "CHAT", "request", request.id, request.status)
     db.commit()
     db.refresh(request)

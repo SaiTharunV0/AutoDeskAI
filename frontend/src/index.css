@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   font-family: Inter, Segoe UI, Arial, sans-serif;
   color: #173657;
   background: #f4f7fb;
@@ -482,6 +482,3 @@ header {
   .chat { height: 360px; }
   .headRight .bell { display: none; }
 }
-.passwordChange { max-width: 460px; margin-top: 14px; }
-.passwordChange label { margin: 10px 0; }
-.recoveryLink { display: inline-block; margin: 10px 10px 10px 0; text-decoration: none; }

@@ -40,7 +40,6 @@ class HelpdeskRequest(Base):
     idempotency_key: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(default=now)
     updated_at: Mapped[datetime] = mapped_column(default=now, onupdate=now)
-    password_started_at: Mapped[datetime | None]
     user: Mapped[User] = relationship(back_populates="requests")
     task: Mapped["SoftwareTask | None"] = relationship(back_populates="request", uselist=False)
     access: Mapped["AccessRequest | None"] = relationship(back_populates="request", uselist=False)
@@ -65,7 +64,6 @@ class AccessRequest(Base):
     request_id: Mapped[int] = mapped_column(ForeignKey("helpdesk_requests.id"), unique=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     application: Mapped[str] = mapped_column(String(80))
-    requested_role: Mapped[str] = mapped_column(String(40), default="jira_user")
     status: Mapped[str] = mapped_column(String(30))
     decision_reason: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(default=now)
