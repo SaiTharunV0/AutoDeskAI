@@ -115,6 +115,16 @@ npm.cmd run build
 
 Automated tests use an isolated in-memory SQLite database and mocked model responses; they never modify your PostgreSQL users or need a running model. The live demo separately exercises PostgreSQL and Ollama.
 
+## Hosted deployment (Vercel + Render + Supabase)
+
+The frontend can be deployed from the `frontend` directory on Vercel. Set the Vercel project's root directory to `frontend`; its `vercel.json` forwards `/api` requests to the Render backend service. The rewrite currently expects the Render service URL `https://autodeskai-backend.onrender.com`, matching the service name in `render.yaml`. If Render assigns a different URL, update both rewrite destinations and redeploy Vercel.
+
+Create a Render Blueprint from this repository and deploy the `autodeskai-backend` web service defined in `render.yaml`. Set its `DATABASE_URL` to the Supabase PostgreSQL **session pooler** connection URI in SQLAlchemy psycopg form (`postgresql+psycopg://...`) with SSL required. Keep the URI private and percent-encode special characters in its password. Render generates `JWT_SECRET_KEY` for the service.
+
+The backend's AI classification uses Ollama. `OLLAMA_HOST` on Render must be an externally reachable Ollama-compatible service; `http://localhost:11434` refers to the Render container and will not reach a developer's computer. Install the model named by `OLLAMA_MODEL` on that service. Do not deploy the endpoint agent unless its device can securely reach the public HTTPS backend URL; keep simulation mode enabled for the prototype.
+
+After both services are deployed, check `https://autodeskai-backend.onrender.com/` and the Vercel site, then register a new account and submit a test request. A free Render service may sleep while idle. The frontend and backend share `/api` through the Vercel rewrite, so browser CORS configuration is not required.
+
 ## API map
 
 | Area | Endpoints |

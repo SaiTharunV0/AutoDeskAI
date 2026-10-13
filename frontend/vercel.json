@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api",
+      "destination": "https://autodeskai-backend.onrender.com/"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://autodeskai-backend.onrender.com/:path*"
+    }
+  ]
+}
