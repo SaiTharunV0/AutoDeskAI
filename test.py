@@ -11,7 +11,8 @@ from sqlalchemy.pool import StaticPool
 from app import main
 from app.database import Base, get_db
 from sqlalchemy.orm import sessionmaker
-from app.models import User, SoftwarePolicy, ApplicationPolicy, AuditLog, Device, SoftwareTask, now
+from app.models import User, SoftwarePolicy, ApplicationPolicy, AuditLog, Device, SoftwareTask, HelpdeskRequest, now
+from app.workflows import correct_legacy_password_requests
 from schema import AgentResponse, Intent
 from auth import create_access_token
 from agent import process_request, safe_message, UnsafeRequest
@@ -86,17 +87,51 @@ class WorkflowTests(unittest.TestCase):
             "password":self.password, "role":"admin"}).status_code, 422)
     def test_password_and_request_ownership(self):
         row = self.request(Intent.PASSWORD_RESET, "I forgot my password").json()
-        self.assertEqual(row["status"], "PENDING")
+        self.assertEqual(row["status"], "AWAITING_USER_ACTION")
         admin_rows = self.client.get("/admin/requests", headers=self.headers(self.admin)).json()
         self.assertEqual(next(item for item in admin_rows if item["id"] == row["id"])["original_message"],
                          "i forgot my password")
         self.assertEqual(self.client.get(f'/requests/{row["id"]}', headers=self.headers(self.other)).status_code, 404)
-        response = self.client.post(f'/requests/{row["id"]}/password/confirm', headers=self.headers(),
-                                   json={"confirm_simulation":True})
-        self.assertEqual(response.json()["status"], "COMPLETED")
-        self.assertIn("Simulated", response.json()["message"])
+        self.assertEqual(self.client.get(f'/requests/{row["id"]}', headers=self.headers(self.admin)).status_code, 404)
+        self.assertEqual(self.client.post(f'/requests/{row["id"]}/password/action').status_code, 401)
+        self.assertEqual(self.client.post(f'/requests/{row["id"]}/password/action',
+            headers={"Authorization":"Bearer invalid"}).status_code, 401)
+        self.assertEqual(self.client.post(f'/requests/{row["id"]}/password/action',
+            headers=self.headers(self.other)).status_code, 404)
+        response = self.client.post(f'/requests/{row["id"]}/password/action', headers=self.headers())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["url"], "https://passwordreset.microsoftonline.com/")
+        self.assertEqual(response.json()["status"], "AWAITING_USER_ACTION")
+        self.assertEqual(self.client.get(f'/requests/{row["id"]}',headers=self.headers()).json()["status"],
+                         "AWAITING_USER_ACTION")
+        self.assertEqual(self.client.post(f'/requests/{row["id"]}/password/confirm',
+            headers=self.headers(), json={"confirm_simulation": True}).status_code, 404)
         history = self.client.get(f'/requests/{row["id"]}/history', headers=self.headers()).json()
-        self.assertEqual([x["action"] for x in history], ["PASSWORD_RESET_REQUESTED","PASSWORD_RESET_COMPLETED"])
+        self.assertEqual([x["action"] for x in history], ["PASSWORD_RESET_REQUESTED","PASSWORD_RESET_LINK_OPENED"])
+        self.assertNotIn(self.password, str(history))
+        self.assertNotIn(self.employee["access_token"], str(history))
+
+    def test_password_change_and_rate_limit(self):
+        row = self.request(Intent.PASSWORD_CHANGE, "change my password").json()
+        action = self.client.post(f'/requests/{row["id"]}/password/action', headers=self.headers()).json()
+        self.assertEqual(action["url"], "https://myaccount.microsoft.com/")
+        self.assertEqual(action["status"], "AWAITING_USER_ACTION")
+        for _ in range(4):
+            self.assertEqual(self.request(Intent.PASSWORD_RESET, "forgot password").status_code, 201)
+        self.assertEqual(self.request(Intent.PASSWORD_RESET, "forgot password").status_code, 429)
+        self.assertEqual(self.client.get('/requests',headers=self.headers()).status_code, 200)
+
+    def test_legacy_simulation_status_is_corrected(self):
+        row = self.request(Intent.PASSWORD_CHANGE, "change password").json()
+        with self.sessions() as db:
+            legacy = db.get(HelpdeskRequest, row["id"])
+            legacy.status = "COMPLETED"
+            legacy.message = "Simulated password operation completed. Your actual login password is unchanged."
+            db.commit()
+            correct_legacy_password_requests(db)
+        updated = self.client.get(f'/requests/{row["id"]}', headers=self.headers()).json()
+        self.assertEqual(updated["status"], "AWAITING_USER_ACTION")
+        self.assertIn("Legacy simulation", updated["message"])
     def test_access_policy_and_unknown_application(self):
         self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"COMPLETED")
         self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access unknown",application="unknown").json()["status"],"REJECTED")

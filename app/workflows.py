@@ -1,6 +1,6 @@
 from datetime import timedelta
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.models import (HelpdeskRequest, SoftwareTask, AccessRequest, AuditLog, Device,
                         SoftwarePolicy, ApplicationPolicy, now)
 from app.catalog import SOFTWARE, APPLICATIONS, software_key
@@ -14,7 +14,8 @@ def audit(db, user_id, action, resource_type, resource_id, status, details=""):
 
 def owned_request(db, request_id, user):
     request = db.get(HelpdeskRequest, request_id)
-    if not request or (user.role != "admin" and request.user_id != user.id):
+    if not request or (request.user_id != user.id and
+                       (user.role != "admin" or request.intent in ("PASSWORD_CHANGE", "PASSWORD_RESET"))):
         raise HTTPException(404, "Request not found")
     return request
 
@@ -30,6 +31,22 @@ def expire_tasks(db):
         audit(db, task.request.user_id, "SOFTWARE_INSTALL_FAILED", "request", task.request_id, "FAILED", "Task timeout")
     db.commit()
 
+def correct_legacy_password_requests(db):
+    rows = db.scalars(select(HelpdeskRequest).where(
+        HelpdeskRequest.intent.in_(("PASSWORD_CHANGE", "PASSWORD_RESET")),
+        HelpdeskRequest.status.in_(("PENDING", "COMPLETED")),
+        HelpdeskRequest.message.in_((
+            "Confirm the simulated password workflow. No identity-provider password will change.",
+            "Simulated password operation completed. Your actual login password is unchanged."
+        )))).all()
+    for row in rows:
+        row.status = "AWAITING_USER_ACTION"
+        row.message = "Legacy simulation did not change a Microsoft password. Continue at Microsoft; completion cannot be verified here."
+        audit(db, row.user_id, "PASSWORD_LEGACY_STATUS_CORRECTED", "request", row.id,
+              row.status, "Prior simulation was not a provider result")
+    if rows:
+        db.commit()
+
 def create_workflow(db, user, payload):
     existing = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.user_id == user.id,
                            HelpdeskRequest.idempotency_key == payload.idempotency_key))
@@ -41,6 +58,15 @@ def create_workflow(db, user, payload):
         audit(db, user.id, 'REQUEST_REJECTED', 'service', None, 'REJECTED', 'Unsupported action or credential-like input')
         db.commit()
         raise
+    if "password" in safe.split():
+        recent = db.scalar(select(func.count(HelpdeskRequest.id)).where(
+            HelpdeskRequest.user_id == user.id,
+            HelpdeskRequest.intent.in_(("PASSWORD_CHANGE", "PASSWORD_RESET")),
+            HelpdeskRequest.created_at >= now() - timedelta(hours=1)))
+        if recent >= 5:
+            audit(db, user.id, "PASSWORD_REQUEST_RATE_LIMITED", "service", None, "REJECTED")
+            db.commit()
+            raise HTTPException(429, "Too many password requests. Try again later.")
     previous = None
     if payload.previous_request_id:
         prior = owned_request(db, payload.previous_request_id, user)
@@ -58,9 +84,12 @@ def create_workflow(db, user, payload):
     db.add(request)
     db.flush()
     if result.intent in (Intent.PASSWORD_CHANGE, Intent.PASSWORD_RESET):
-        request.status = "PENDING"
-        request.message = "Confirm the simulated password workflow. No identity-provider password will change."
-        audit(db, user.id, result.intent.value + "_REQUESTED", "request", request.id, "PENDING")
+        request.status = "AWAITING_USER_ACTION"
+        request.message = ("Continue at Microsoft My Account to change your organization password. "
+                           if result.intent == Intent.PASSWORD_CHANGE else
+                           "Continue at Microsoft Self-Service Password Reset to recover your organization account. ") + \
+                          "AutoDeskAI cannot verify completion; this request remains awaiting user action."
+        audit(db, user.id, result.intent.value + "_REQUESTED", "request", request.id, request.status)
     elif result.intent == Intent.SOFTWARE_INSTALL:
         key = software_key(result.software)
         policy = db.get(SoftwarePolicy, key) if key else None
@@ -102,6 +131,10 @@ def create_workflow(db, user, payload):
         else:
             request.message = "Please specify password change/reset, software installation, or application access."
         audit(db, user.id, "CLARIFICATION_REQUESTED", "request", request.id, request.status)
+    elif result.intent == Intent.UNSUPPORTED:
+        request.status = "REJECTED"
+        request.message = "This request is not supported."
+        audit(db, user.id, "UNSUPPORTED_REQUEST", "request", request.id, request.status)
     else:
         request.status = "COMPLETED"
         request.message = "I can help with password change/reset, approved software installation, and application access."

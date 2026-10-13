@@ -102,8 +102,11 @@ class PolicyIn(Input):
 class DeviceState(Input):
     status: Literal["ACTIVE", "DISABLED"]
 
-class PasswordConfirm(Input):
-    confirm_simulation: Literal[True]
+class PasswordActionOut(BaseModel):
+    request_id: int
+    status: Literal["AWAITING_USER_ACTION"]
+    url: str
+    message: str
 
 class AuditOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

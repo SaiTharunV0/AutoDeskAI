@@ -10,9 +10,16 @@ def validate_agent_response(
     result: AgentResponse,
     user_message: str | None = None,
 ) -> AgentResponse:
+    if user_message and "password" in user_message.lower() and result.intent in (Intent.CHAT, Intent.SOFTWARE_INSTALL, Intent.ACCESS_REQUEST):
+        return AgentResponse(intent=Intent.CLARIFICATION, message="Do you need to change or reset your password?")
     if user_message and result.intent in (Intent.PASSWORD_CHANGE, Intent.PASSWORD_RESET):
         if "password" not in user_message.lower():
             return AgentResponse(intent=Intent.CLARIFICATION, message="Which IT workflow do you need?")
+        words = set(user_message.lower().split())
+        if result.intent == Intent.PASSWORD_CHANGE and words & {"forgot", "reset"}:
+            return AgentResponse(intent=Intent.CLARIFICATION, message="Do you need to change or reset your password?")
+        if result.intent == Intent.PASSWORD_RESET and "change" in words and not words & {"forgot", "reset"}:
+            return AgentResponse(intent=Intent.CLARIFICATION, message="Do you need to change or reset your password?")
 
     if result.intent == Intent.ACCESS_REQUEST and user_message:
         if not _contains_action(

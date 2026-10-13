@@ -1,5 +1,7 @@
 # Implementation and verification report
 
+This report records the earlier simulation milestone. The current organization password workflow is documented in [README.md](README.md#organization-password-workflow): Microsoft-hosted links replace the simulated confirmation, and password requests remain `AWAITING_USER_ACTION` because completion is not verifiable by AutoDeskAI. The latest isolated test run passed 23 tests and the frontend production build passed.
+
 ## Existing implementation preserved
 The backend branch contained a User model, basic user routes, JWT login, an Ollama migration in progress, intent schemas and validation. Local modifications were present before work began. Those changes were incorporated; no branch reset or checkout was performed. No React source existed in either the working tree or origin/frontend. Existing tests and documentation still targeted Gemini.
 

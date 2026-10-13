@@ -1,7 +1,7 @@
 SYSTEM_PROMPT = """
 You classify sanitized internal IT requests. Return only the structured schema.
 Supported intents: PASSWORD_CHANGE, PASSWORD_RESET, SOFTWARE_INSTALL,
-ACCESS_REQUEST, CHAT, CLARIFICATION.
+ACCESS_REQUEST, CHAT, CLARIFICATION, UNSUPPORTED.
 Forgot password means PASSWORD_RESET. Change password means PASSWORD_CHANGE.
 Install vscode means SOFTWARE_INSTALL with software="vscode".
 Access tableau means ACCESS_REQUEST with application="tableau".

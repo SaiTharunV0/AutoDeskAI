@@ -12,7 +12,7 @@ from app.database import Base, engine, get_db, SessionLocal
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS
-from app.workflows import audit, owned_request, create_workflow, expire_tasks
+from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
 from agent import UnsafeRequest
@@ -23,6 +23,7 @@ async def lifespan(app):
     validate_config()
     Base.metadata.create_all(engine)  # Additive: existing users schema stays intact.
     with SessionLocal() as db:
+        correct_legacy_password_requests(db)
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
@@ -33,7 +34,7 @@ async def lifespan(app):
     yield
 
 app = FastAPI(title="AutoDeskAI", version="1.0.0", lifespan=lifespan,
-    description="Authenticated, policy-controlled IT workflows. Password and access providers are simulated.")
+    description="Authenticated IT workflows. Password actions use Microsoft-hosted experiences; completion is not verified here.")
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
@@ -172,24 +173,26 @@ def history(request_id: int, user=Depends(get_current_user), db: Session = Depen
     return db.scalars(select(AuditLog).where(AuditLog.resource_type == "request",
         AuditLog.resource_id == request_id).order_by(AuditLog.id)).all()
 
-@app.post("/requests/{request_id}/password/confirm", response_model=RequestOut, tags=["Requests"],
-          description="Confirms a simulated identity operation for the authenticated owner. Does not change a real password.")
-def password_confirm(request_id: int, payload: PasswordConfirm, user=Depends(get_current_user),
-                     db: Session = Depends(get_db)):
-    row = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.id == request_id).with_for_update())
+MICROSOFT_PASSWORD_URLS = {
+    "PASSWORD_CHANGE": "https://myaccount.microsoft.com/",
+    "PASSWORD_RESET": "https://passwordreset.microsoftonline.com/",
+}
+
+@app.post("/requests/{request_id}/password/action", response_model=PasswordActionOut, tags=["Requests"],
+          description="Return the Microsoft-hosted action for the authenticated owner. Opening it does not prove completion.")
+def password_action(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    row = db.get(HelpdeskRequest, request_id)
     if not row or row.user_id != user.id:
         raise HTTPException(404, "Request not found")
-    if row.intent not in ("PASSWORD_RESET", "PASSWORD_CHANGE"):
+    if row.intent not in MICROSOFT_PASSWORD_URLS:
         raise HTTPException(409, "Not a password workflow")
-    if row.status == "COMPLETED":
-        return row
-    if row.status != "PENDING":
-        raise HTTPException(409, "Workflow is not pending")
-    row.status = "COMPLETED"
-    row.message = "Simulated password operation completed. Your actual login password is unchanged."
-    audit(db, user.id, row.intent + "_COMPLETED", "request", row.id, "COMPLETED", "Simulated identity provider")
+    if row.status != "AWAITING_USER_ACTION":
+        raise HTTPException(409, "Workflow is not awaiting user action")
+    audit(db, user.id, row.intent + "_LINK_OPENED", "request", row.id, row.status,
+          "Microsoft-hosted action issued; completion unverified")
     db.commit()
-    return row
+    return PasswordActionOut(request_id=row.id, status=row.status,
+        url=MICROSOFT_PASSWORD_URLS[row.intent], message=row.message)
 
 @app.get("/devices", response_model=list[DeviceOut], tags=["Devices"])
 def own_devices(user=Depends(get_current_user), db: Session = Depends(get_db)):

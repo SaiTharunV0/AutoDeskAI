@@ -45,11 +45,11 @@ def main():
             return row
         row = request("I forgot my password.")
         assert row["intent"] == "PASSWORD_RESET", row["intent"]
-        response = client.post(f'/requests/{row["id"]}/password/confirm',headers=employee_headers,
-                               json={"confirm_simulation":True})
+        response = client.post(f'/requests/{row["id"]}/password/action',headers=employee_headers)
         response.raise_for_status()
-        assert response.json()["status"] == "COMPLETED"
-        print("DEMO 1: password reset simulation COMPLETED", flush=True)
+        assert response.json()["status"] == "AWAITING_USER_ACTION"
+        assert response.json()["url"] == "https://passwordreset.microsoftonline.com/"
+        print("DEMO 1: Microsoft password reset link issued; completion unverified", flush=True)
         row = request("Install VS Code.")
         assert row["intent"] == "SOFTWARE_INSTALL", row["intent"]
         assert row["status"] == "PENDING", row["status"]

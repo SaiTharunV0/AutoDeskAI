@@ -1,6 +1,6 @@
 # AutoDeskAI
 
-Authenticated IT helpdesk prototype using FastAPI, SQLAlchemy/PostgreSQL, React/Vite and Ollama. The AI classifies requests; backend policy and device ownership determine what can run.
+Authenticated IT helpdesk prototype using FastAPI, SQLAlchemy/PostgreSQL, React/Vite and Ollama. The AI classifies requests; backend policy and device ownership determine what can run. Organization password help opens Microsoft-hosted experiences and remains unverified in AutoDeskAI.
 
 ## Recent changes
 
@@ -16,7 +16,7 @@ This implementation preserves the existing backend foundation while completing t
 ## What works
 
 - Employee registration, password hashing (PBKDF2-SHA256; existing bcrypt hashes supported), expiring JWTs and server-side employee/admin authorization.
-- Password reset/change requests with an explicit authenticated confirmation step and a **simulated** identity operation. Actual login passwords do not change.
+- Authenticated organization password requests link to Microsoft My Account (change) or Microsoft SSPR (reset). The request stays `AWAITING_USER_ACTION` because the hosted pages do not return a verifiable result to AutoDeskAI. AutoDeskAI login passwords remain separate.
 - Approved VS Code installation tasks dispatched only to the enrolled device. The endpoint agent validates its device identity and local software allowlist, simulates installation and reports a confirmed result.
 - Tableau access decisions from the backend policy table. This is a **demo access decision**, not external provisioning.
 - Request status/history, idempotent submissions, device heartbeat/offline checks, task timeout, audit records, and admin policy/device management.
@@ -91,7 +91,7 @@ Python 3.11+, PostgreSQL, Node.js 20.19+ or 22.12+, and Ollama with a locally in
 
 ## Demonstrate the three workflows
 
-- Sign in and submit **I forgot my password.** Confirm the simulated operation on its request card. The request and audit history show completion without changing your login password.
+- Sign in and submit **I forgot my password.** Use the request card to open Microsoft SSPR. The request and audit history show that a link was issued, with completion unverified.
 - Select your enrolled device and submit **Install VS Code.** Leave the endpoint agent running. The UI polls status every five seconds and shows the endpoint-confirmed simulation result.
 - Submit **I need access to Tableau.** The policy table determines approval or rejection. Disable Tableau or require the admin role to demonstrate rejection.
 
@@ -131,7 +131,7 @@ After both services are deployed, check `https://autodeskai-backend.onrender.com
 | --- | --- |
 | Authentication | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` |
 | Requests | `POST /requests` (alias `POST /ai/request`), `GET /requests`, `GET /requests/{id}`, `GET /requests/{id}/history` |
-| Password simulation | `POST /requests/{id}/password/confirm` |
+| Organization password action | `POST /requests/{id}/password/action` (owned Microsoft-hosted link; no completion claim) |
 | Employee devices/catalog | `GET /devices`, `GET /catalog` |
 | Agent | `POST /agent/register` (admin only), `GET /agent/heartbeat`, `GET /agent/tasks`, `POST /agent/tasks/{id}/result` |
 | Admin views | `GET /admin/users`, `GET /admin/requests`, `GET /admin/devices`, `GET /admin/audit` |
@@ -147,15 +147,53 @@ HTTP errors: 400 unsupported/unsafe action; 401 invalid/expired authentication; 
 
 Startup validates the JWT configuration and adds missing tables with SQLAlchemy `create_all`. The existing `users` columns are preserved. New tables: `devices`, `helpdesk_requests`, `software_tasks`, `access_requests`, `audit_logs`, `software_policies`, `application_policies`. Existing policy settings are preserved; the demo catalog is seeded only when absent. No destructive migration runs. For future changes to existing columns, use explicit versioned migrations; `create_all` does not alter old schemas.
 
-Request/task states include PENDING, PROCESSING, COMPLETED, FAILED, REJECTED and NEEDS_CLARIFICATION. Dispatch uses PostgreSQL row locks with SKIP LOCKED. Policies are rechecked before dispatch. Devices can report only their own dispatched tasks. Repeated identical result delivery is idempotent; conflicting or late results are rejected. The endpoint retries unacknowledged results during its current process lifetime. A crashed/lost task eventually fails after the configured timeout rather than silently succeeding.
+At startup, password requests bearing either of the two exact legacy simulation messages and status `PENDING` or `COMPLETED` are corrected to `AWAITING_USER_ACTION` with an audit entry. This preserves the record while removing an earlier false completion claim. No schema change is needed.
+
+Request/task states include PENDING, AWAITING_USER_ACTION, PROCESSING, COMPLETED, FAILED, REJECTED and NEEDS_CLARIFICATION. Dispatch uses PostgreSQL row locks with SKIP LOCKED. Policies are rechecked before dispatch. Devices can report only their own dispatched tasks. Repeated identical result delivery is idempotent; conflicting or late results are rejected. The endpoint retries unacknowledged results during its current process lifetime. A crashed/lost task eventually fails after the configured timeout rather than silently succeeding.
 
 Raw chat messages are not retained. Only recognized workflow tokens and canonical catalog names reach Ollama. Unknown entities are replaced with fixed unknown-target markers. This deliberately limits natural-language flexibility to reduce credential disclosure risk. The backend never displays arbitrary model prose as a success report. Audit details and endpoint result strings are backend-owned constants, not untrusted output.
 
+## Organization password workflow
+
+```mermaid
+flowchart TD
+    A[Employee opens AutoDeskAI] --> B{Signed in locally?}
+    B -- No --> C[AutoDeskAI login]
+    C --> B
+    B -- Yes --> D[Employee enters password request]
+    D --> J[Validate JWT and rate limit]
+    J -- Invalid --> K[Reject safely]
+    J -- Valid --> E[Ollama classifies sanitized intent]
+    E --> F{Change or reset?}
+    F -- Unsupported or unclear --> G[Reject or ask for clarification]
+    F -- Change --> H[Create owned change request]
+    F -- Reset --> I[Create owned reset request]
+    H --> L{Operation}
+    I --> L
+    L -- Change --> M[Microsoft My Account authenticated change]
+    L -- Reset --> N[Microsoft hosted SSPR and identity verification]
+    M --> O{Provider completion verifiable?}
+    N --> O
+    O -- No hosted callback --> P[Keep AWAITING_USER_ACTION]
+    O -- Supported verified result in future --> Q[Only then mark COMPLETED]
+    G --> R
+    K --> R[Audit safe metadata]
+    P --> R
+    Q --> R
+    R --> S[Show truthful request status]
+```
+
+The existing local JWT identifies the AutoDeskAI user and owns the request; it does not prove that the same email belongs to a Microsoft tenant. The action endpoint accepts only the request ID, checks ownership and the operation, and returns a fixed Microsoft URL. It accepts no target account or password. It records request ID, user ID, operation, timestamp, status, and safe link-issuance detail in the existing request/audit tables. No Microsoft password, token, or secret is retained. The original request text is reduced to recognized workflow words before it is stored or sent to Ollama.
+
+Microsoft's [My Account instructions](https://support.microsoft.com/en-us/accounts-billing/work-school/change-your-work-or-school-account-password) describe changing a known work or school password after Microsoft sign-in. Its [SSPR instructions](https://learn.microsoft.com/en-us/entra/identity/authentication/concept-sspr-deploy) describe reset and the tenant prerequisites. Enable SSPR for the pilot user or group, register enough recovery methods, assign the required license, and configure password writeback if using hybrid AD. Test with a dedicated non-admin tenant account. The app uses Microsoft's public hosted pages and needs no tenant ID, client ID, redirect URI, client secret, Graph permission, or admin consent for this link-out integration. It cannot receive a provider result or correlation ID and therefore never claims completion. The local AutoDeskAI password is unaffected.
+
+For Vercel, deploy the frontend with the existing `/api/:path*` rewrite to Render; `/api/requests/{id}/password/action` maps to the FastAPI route without `/api`. Set backend database/JWT/Ollama variables as described above. No `VITE_` secret is needed. After deployment, register and log in as a test employee, submit each password intent, verify the owned action URL and `AWAITING_USER_ACTION` status, and complete any real password operation only within Microsoft's hosted site. Check another account receives 404 for the action and request detail. AutoDeskAI cannot confirm the result after returning from Microsoft.
+
 ## Prototype limitations
 
-- Password, access provisioning and installation are explicit simulations. Only VS Code and Tableau are predefined capabilities. Adding a capability requires a code-reviewed catalog/installer change; administrators can toggle existing approvals and access roles.
-- An authenticated password-reset request does not provide unauthenticated account recovery. Real identity integration needs an approved identity-provider verification flow.
+- Microsoft hosts organization password changes and resets. AutoDeskAI cannot verify completion from those hosted pages, so password requests remain AWAITING_USER_ACTION. Access provisioning and installation are explicit simulations. Only VS Code and Tableau are predefined capabilities. Adding a capability requires a code-reviewed catalog/installer change; administrators can toggle existing approvals and access roles.
+- An authenticated password-reset request does not provide unauthenticated AutoDeskAI account recovery. Local signup email ownership is not verified against Entra; Microsoft independently authenticates or verifies the organization account in its hosted experience.
 - Tokens expire but there is no refresh-token or immediate user-session revocation flow. Device disabling is immediate. Public registration and administrator bootstrap are intended for local development.
-- No production rate limiter, durable task queue, persistent endpoint result journal, distributed scheduler, or external identity/access connector is included. Task expiry is evaluated when requests/tasks/results are queried.
+- Password requests are limited to five per account per hour using database history. No general production rate limiter, durable task queue, persistent endpoint result journal, distributed scheduler, or external identity/access connector is included. Task expiry is evaluated when requests/tasks/results are queried.
 - Lists are bounded (200 employee requests, 500 admin records); full pagination is not implemented.
 - Visual browser QA requires a connected browser. Build/HTTP verification is separate from visual verification.
