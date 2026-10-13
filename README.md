@@ -92,7 +92,7 @@ Python 3.11+, PostgreSQL, Node.js 20.19+ or 22.12+, and Ollama with a locally in
 ## Demonstrate the three workflows
 
 - Sign in and submit **I forgot my password.** Use the request card to open Microsoft SSPR. The request and audit history show that a link was issued, with completion unverified.
-- Select your enrolled device and submit **Install VS Code.** Leave the endpoint agent running. The UI polls status every five seconds and shows the endpoint-confirmed simulation result.
+- Select your enrolled device and submit **Install VS Code.** Leave the endpoint agent running. While a request is pending or processing, the visible UI refreshes its status every 15 seconds and shows the endpoint-confirmed simulation result.
 - Submit **I need access to Tableau.** The policy table determines approval or rejection. Disable Tableau or require the admin role to demonstrate rejection.
 
 For a repeatable live integration check, with the backend already running:

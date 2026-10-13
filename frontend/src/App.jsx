@@ -1,5 +1,6 @@
 import React,{useEffect,useRef,useState}from'react';
 import{Activity,AlertCircle,Bell,BookOpen,Bot,CheckCircle2,ChevronDown,Clock3,Eye,EyeOff,FileText,Grid2X2,Home,KeyRound,Laptop,LogOut,Menu,MonitorDown,Search,Send,Settings,ShieldCheck,Ticket,UserCircle2,Users,X}from'lucide-react';
+import {startPolling} from './polling.js';
 
 const label=x=>(x||'PENDING').replaceAll('_',' ');
 const title=x=>({SOFTWARE_INSTALL:'Software Installation',ACCESS_REQUEST:'Application Access',PASSWORD_RESET:'Password Reset',PASSWORD_CHANGE:'Password Change',CLARIFICATION:'More Information Needed'}[x.intent]||'IT Support Request');
@@ -11,16 +12,31 @@ export default function App(){
  const[token,setToken]=useState(''),[user,setUser]=useState(null),[mode,setMode]=useState('login'),[active,setActive]=useState('Dashboard'),[mobile,setMobile]=useState(false);
  const[requests,setRequests]=useState([]),[devices,setDevices]=useState([]),[chat,setChat]=useState([]),[msg,setMsg]=useState(''),[search,setSearch]=useState(''),[selectedDevice,setSelectedDevice]=useState(''),[clarify,setClarify]=useState(null),[retryKey,setRetryKey]=useState(null);
  const[busy,setBusy]=useState(false),[error,setError]=useState(''),[modal,setModal]=useState(null),[admin,setAdmin]=useState({users:[],requests:[],devices:[],audit:[]}),[catalog,setCatalog]=useState({software:[],applications:[]}),[enrollment,setEnrollment]=useState(null),[authRole,setAuthRole]=useState('employee');
- const session=useRef('');
- async function api(path,options={}){let response;try{response=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...options.headers}})}catch{throw new Error('Backend unavailable. Start FastAPI and retry.')}let data;try{data=await response.json()}catch{throw new Error('The backend returned an invalid response.')}if(!response.ok){if(response.status===401&&token&&session.current===token)logout();const d=data.detail;throw new Error(response.status===401?'Your session expired. Please sign in again.':typeof d==='string'?d:Array.isArray(d)?d.map(x=>x.msg).join('. '):'Request failed.')}return data}
+ const session=useRef(''),employeePoll=useRef(null),adminPoll=useRef(null);
+ async function api(path,options={}){let response;try{response=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...options.headers}})}catch(e){if(e.name==='AbortError')throw e;throw new Error('Backend unavailable. Start FastAPI and retry.')}let data;try{data=await response.json()}catch(e){if(e.name==='AbortError')throw e;throw new Error('The backend returned an invalid response.')}if(!response.ok){if(response.status===401&&token&&session.current===token){logout();setError('Your session expired. Please sign in again.')}const d=data.detail;throw new Error(response.status===401?'Your session expired. Please sign in again.':typeof d==='string'?d:Array.isArray(d)?d.map(x=>x.msg).join('. '):'Request failed.')}return data}
  async function act(fn){setBusy(true);setError('');try{await fn()}catch(e){setError(e.message)}finally{setBusy(false)}}
- function logout(){session.current='';setToken('');setUser(null);setRequests([]);setDevices([]);setChat([]);setActive('Dashboard')}
- async function refresh(){const[r,d]=await Promise.all([api('/requests'),api('/devices')]);if(session.current===token){setRequests(r);setDevices(d)}}
- async function refreshAdmin(){const[u,r,d,a,c]=await Promise.all([api('/admin/users'),api('/admin/requests'),api('/admin/devices'),api('/admin/audit'),api('/catalog')]);if(session.current===token){setAdmin({users:u,requests:r.map(request=>({...request,message:request.original_message&&request.original_message!=='[not retained]'?request.original_message:request.message})),devices:d,audit:a});setCatalog(c)}}
- useEffect(()=>{if(!token)return;let live=true;const poll=async()=>{try{if(live){if(user?.role==='admin'){if(['Dashboard','Admin Panel','Audit Logs'].includes(active))await refreshAdmin()}else await refresh();setError(current=>current==='Backend unavailable. Start FastAPI and retry.'?'':current)}}catch(e){if(live)setError(e.message)}};poll();const timer=setInterval(poll,5000);return()=>{live=false;clearInterval(timer)}},[token,active,user]);
+ function logout(){session.current='';employeePoll.current?.stop();adminPoll.current?.stop();setToken('');setUser(null);setRequests([]);setDevices([]);setChat([]);setActive('Dashboard')}
+ function clearBackendError(){setError(current=>current==='Backend unavailable. Start FastAPI and retry.'?'':current)}
+ async function refreshAdmin(){await Promise.all(['core','devices'].map(name=>adminPoll.current?.refresh(name)))}
+ useEffect(()=>{if(!token||user?.role==='admin')return;
+   const poll=startPolling([
+     {name:'requests',interval:15000,load:async signal=>{const rows=await api('/requests',{signal});if(!signal.aborted&&session.current===token){setRequests(rows);clearBackendError()}return rows.some(row=>['PENDING','PROCESSING'].includes(row.status))}},
+     {name:'devices',interval:45000,load:async signal=>{const rows=await api('/devices',{signal});if(!signal.aborted&&session.current===token){setDevices(rows);clearBackendError()}}},
+   ],{onError:e=>setError(e.message)});
+   employeePoll.current=poll;
+   return()=>{poll.stop();if(employeePoll.current===poll)employeePoll.current=null};
+ },[token,user?.role]);
+ useEffect(()=>{if(!token||user?.role!=='admin')return;
+   const poll=startPolling([
+     {name:'core',interval:15000,load:async signal=>{const[u,r,a,c]=await Promise.all([api('/admin/users',{signal}),api('/admin/requests',{signal}),api('/admin/audit',{signal}),api('/catalog',{signal})]);if(!signal.aborted&&session.current===token){setAdmin(current=>({...current,users:u,requests:r.map(request=>({...request,message:request.original_message&&request.original_message!=='[not retained]'?request.original_message:request.message})),audit:a}));setCatalog(c);clearBackendError()}}},
+     {name:'devices',interval:45000,load:async signal=>{const rows=await api('/admin/devices',{signal});if(!signal.aborted&&session.current===token){setAdmin(current=>({...current,devices:rows}));clearBackendError()}}},
+   ],{onError:e=>setError(e.message)});
+   adminPoll.current=poll;
+   return()=>{poll.stop();if(adminPoll.current===poll)adminPoll.current=null};
+ },[token,user?.role]);
  useEffect(()=>{if(user&&!chat.length)setChat([{r:'bot',t:`Hello ${user.name}! I can help with password reset or change, approved software installation, and application access.`}])},[user,chat.length]);
  async function authenticate(e){e.preventDefault();const f=new FormData(e.currentTarget),password=f.get('password');await act(async()=>{if(mode==='register')await api('/auth/register',{method:'POST',body:JSON.stringify({name:f.get('name'),email:f.get('email'),password})});const r=await api('/auth/login',{method:'POST',body:JSON.stringify({email:f.get('email'),password})});session.current=r.access_token;setToken(r.access_token);setUser(r.user);setActive('Dashboard')})}
- async function send(text=msg){text=text.trim();if(!text||busy)return;setChat(c=>[...c,{r:'user',t:text}]);setMsg('');await act(async()=>{const key=retryKey||crypto.randomUUID();setRetryKey(key);const r=await api('/requests',{method:'POST',body:JSON.stringify({message:text,device_id:selectedDevice?Number(selectedDevice):null,previous_request_id:clarify,idempotency_key:key})});setRetryKey(null);setClarify(r.status==='NEEDS_CLARIFICATION'?r.id:null);setChat(c=>[...c,{r:'bot',t:r.message,id:r.id,status:r.status}]);await refresh()})}
+ async function send(text=msg){text=text.trim();if(!text||busy)return;setChat(c=>[...c,{r:'user',t:text}]);setMsg('');await act(async()=>{const key=retryKey||crypto.randomUUID();setRetryKey(key);const r=await api('/requests',{method:'POST',body:JSON.stringify({message:text,device_id:selectedDevice?Number(selectedDevice):null,previous_request_id:clarify,idempotency_key:key})});setRetryKey(null);setClarify(r.status==='NEEDS_CLARIFICATION'?r.id:null);setChat(c=>[...c,{r:'bot',t:r.message,id:r.id,status:r.status}]);await employeePoll.current?.refresh('requests')})}
  async function passwordAction(id){await act(async()=>{const result=await api(`/requests/${id}/password/action`,{method:'POST'});if(!['https://myaccount.microsoft.com/','https://passwordreset.microsoftonline.com/'].includes(result.url))throw new Error('Invalid Microsoft destination.');window.location.assign(result.url)})}
  if(!user)return <Auth mode={mode} setMode={setMode} submit={authenticate} busy={busy} error={error} authRole={authRole} setAuthRole={setAuthRole}/>;
  const filtered=requests.filter(x=>(title(x)+x.status+x.message).toLowerCase().includes(search.toLowerCase()));
