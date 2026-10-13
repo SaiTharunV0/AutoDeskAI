@@ -13,7 +13,9 @@ try:
 except Exception as error:
     print("Database check:", type(error).__name__)
 try:
-    response = httpx.get(config.OLLAMA_HOST + "/api/tags", timeout=5)
+    api_key = os.getenv("OLLAMA_API_KEY")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+    response = httpx.get(config.OLLAMA_HOST + "/api/tags", headers=headers, timeout=5)
     print("Ollama status:", response.status_code)
     print("Configured model present:", any(m["name"] == config.OLLAMA_MODEL for m in response.json().get("models", [])))
 except Exception as error:

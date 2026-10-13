@@ -12,9 +12,11 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: OLLAMA_HOST
-        sync: false
+        value: https://ollama.com
       - key: OLLAMA_MODEL
-        value: qwen3:8b
+        value: gemma4:31b
+      - key: OLLAMA_API_KEY
+        sync: false
       - key: OLLAMA_TIMEOUT
         value: "90"
       - key: TASK_TIMEOUT_SECONDS

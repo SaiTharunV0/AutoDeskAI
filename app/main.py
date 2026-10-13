@@ -51,7 +51,7 @@ async def unsafe_error(request, exc):
 
 @app.exception_handler(RuntimeError)
 async def service_error(request, exc):
-    return JSONResponse(status_code=503, content={"detail": "Local AI unavailable or returned invalid output. Please retry."})
+    return JSONResponse(status_code=503, content={"detail": "AI service unavailable or returned invalid output. Please retry."})
 
 @app.get("/", tags=["Health"])
 def root():

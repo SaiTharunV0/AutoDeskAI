@@ -1,6 +1,6 @@
 # AutoDeskAI
 
-Authenticated IT helpdesk prototype using FastAPI, SQLAlchemy/PostgreSQL, React/Vite and local Ollama. The AI classifies requests; backend policy and device ownership determine what can run.
+Authenticated IT helpdesk prototype using FastAPI, SQLAlchemy/PostgreSQL, React/Vite and Ollama. The AI classifies requests; backend policy and device ownership determine what can run.
 
 ## Recent changes
 
@@ -121,7 +121,7 @@ The frontend can be deployed from the `frontend` directory on Vercel. Set the Ve
 
 Create a Render Blueprint from this repository and deploy the `autodeskai-backend` web service defined in `render.yaml`. Set its `DATABASE_URL` to the Supabase PostgreSQL **session pooler** connection URI in SQLAlchemy psycopg form (`postgresql+psycopg://...`) with SSL required. Keep the URI private and percent-encode special characters in its password. Render generates `JWT_SECRET_KEY` for the service.
 
-The backend's AI classification uses Ollama. `OLLAMA_HOST` on Render must be an externally reachable Ollama-compatible service; `http://localhost:11434` refers to the Render container and will not reach a developer's computer. Install the model named by `OLLAMA_MODEL` on that service. Do not deploy the endpoint agent unless its device can securely reach the public HTTPS backend URL; keep simulation mode enabled for the prototype.
+The backend's AI classification uses Ollama. The Render Blueprint uses Ollama Cloud at `https://ollama.com` with the `gemma4:31b` cloud model. Create an Ollama API key and enter it as the Render `OLLAMA_API_KEY` secret; the Ollama Python client reads this environment variable for authentication. Cloud classification sends the sanitized request representation to Ollama Cloud for processing. Keep the key out of browser code, chat, and source control. For a self-hosted Ollama server instead, set `OLLAMA_HOST`, `OLLAMA_MODEL`, and `OLLAMA_API_KEY` to values for a publicly reachable service; `localhost` on Render means the Render container itself. Do not deploy the endpoint agent unless its device can securely reach the public HTTPS backend URL; keep simulation mode enabled for the prototype.
 
 After both services are deployed, check `https://autodeskai-backend.onrender.com/` and the Vercel site, then register a new account and submit a test request. A free Render service may sleep while idle. The frontend and backend share `/api` through the Vercel rewrite, so browser CORS configuration is not required.
 
