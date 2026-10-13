@@ -67,6 +67,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.get("/requests").status_code, 401)
         self.assertEqual(self.client.get("/admin/users", headers=self.headers()).status_code, 403)
         self.assertEqual(self.client.get("/admin/users", headers=self.headers(self.admin)).status_code, 200)
+        self.assertEqual(self.client.post("/auth/register", json={"email":"six@example.test","name":"six",
+            "password":"abcdef"}).status_code, 201)
+        self.assertEqual(self.client.post("/auth/register", json={"email":"five@example.test","name":"five",
+            "password":"abcde"}).status_code, 422)
         self.assertEqual(self.client.get('/users',headers=self.headers()).status_code,403)
         self.assertEqual(self.client.put('/users/1',headers=self.headers(),json={
             'name':'changed','email':'changed@example.test'}).status_code,403)

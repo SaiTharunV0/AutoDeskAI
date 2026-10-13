@@ -21,8 +21,8 @@ class Register(Login):
     @field_validator("password")
     @classmethod
     def password_length(cls, value):
-        if len(value.get_secret_value()) < 12:
-            raise ValueError("Use at least 12 characters")
+        if len(value.get_secret_value()) < 6:
+            raise ValueError("Use at least 6 characters")
         return value
 
 class UserOut(BaseModel):
