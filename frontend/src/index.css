@@ -66,6 +66,20 @@ input, select {
 }
 .authCard h2 { margin: 0; font-size: 32px; color: #173657; }
 .authCard p { color: #59728d; margin: 8px 0 18px; }
+.passwordField { position: relative; margin-top: 6px; }
+.passwordField input { margin-top: 0; padding-right: 44px; }
+.passwordToggle {
+  position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+  display: grid; place-items: center; width: 32px; height: 32px;
+  padding: 0; border: 0; border-radius: 6px; background: transparent;
+  color: #59728d;
+}
+.passwordToggle:hover { background: #edf4ff; color: #173657; }
+.passwordToggle:focus-visible { outline: 2px solid #1976ed; outline-offset: 2px; }
+.srOnly {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .authTabs {
   display: flex; gap: 8px; margin-bottom: 18px;
   background: #edf4ff; border: 1px solid #dbe6f4;
