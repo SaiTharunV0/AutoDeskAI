@@ -14,7 +14,10 @@ def main():
     with httpx.Client(base_url="http://127.0.0.1:8000", timeout=180) as client:
         def account(label):
             email = label + "-" + suffix + "@demo.invalid"
-            response = client.post("/auth/register", json={"name":"Demo " + label,"email":email,"password":password})
+            response = client.post("/auth/register", json={
+                "first_name":"Demo", "last_name":label.title(), "date_of_birth":"1995-06-15",
+                "username":label + "-" + suffix, "email":email,
+                "password":password, "confirm_password":password})
             response.raise_for_status()
             response = client.post("/auth/login",json={"email":email,"password":password})
             response.raise_for_status()

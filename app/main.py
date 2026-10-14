@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import Session
-from app.database import Base, engine, get_db, SessionLocal
+from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profile
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS
@@ -21,7 +21,8 @@ import config
 @asynccontextmanager
 async def lifespan(app):
     validate_config()
-    Base.metadata.create_all(engine)  # Additive: existing users schema stays intact.
+    Base.metadata.create_all(engine)
+    upgrade_user_profile()
     with SessionLocal() as db:
         correct_legacy_password_requests(db)
         for key in SOFTWARE:
@@ -65,7 +66,13 @@ def database_test(db: Session = Depends(get_db), user=Depends(require_admin)):
 
 @app.post("/auth/register", response_model=UserOut, status_code=201, tags=["Authentication"])
 def register(payload: Register, db: Session = Depends(get_db)):
-    user = User(name=payload.name.strip(), email=payload.email,
+    if db.scalar(select(User.id).where(User.email == payload.email)):
+        raise HTTPException(409, 'Email already registered')
+    if db.scalar(select(User.id).where(User.username == payload.username)):
+        raise HTTPException(409, 'Username already taken')
+    user = User(name=f'{payload.first_name} {payload.last_name}', first_name=payload.first_name,
+                last_name=payload.last_name, date_of_birth=payload.date_of_birth,
+                username=payload.username, email=payload.email,
                 password_hash=hash_password(payload.password.get_secret_value()), role="employee")
     db.add(user)
     try:
@@ -74,18 +81,19 @@ def register(payload: Register, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "Email already registered") from None
+        raise HTTPException(409, 'Email or username already registered') from None
     return user
 
 @app.post("/auth/login", response_model=TokenOut, tags=["Authentication"])
 def login(payload: Login, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == payload.email))
+    user = db.scalar(select(User).where(
+        User.email == payload.identifier if '@' in payload.identifier else User.username == payload.identifier))
     valid = verify_password(payload.password.get_secret_value(),
                             user.password_hash if user else DUMMY_HASH)
     if not user or not valid:
         audit(db, user.id if user else None, "LOGIN_FAILED", "user", user.id if user else None, "FAILED")
         db.commit()
-        raise HTTPException(401, "Invalid email or password")
+        raise HTTPException(401, 'Username/email or password is wrong')
     audit(db, user.id, "LOGIN_SUCCESS", "user", user.id, "COMPLETED")
     db.commit()
     return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))

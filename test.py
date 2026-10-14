@@ -6,10 +6,10 @@ os.environ["JWT_SECRET_KEY"] = secrets.token_urlsafe(48)
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.pool import StaticPool
 from app import main
-from app.database import Base, get_db
+from app.database import Base, get_db, upgrade_user_profile
 from sqlalchemy.orm import sessionmaker
 from app.models import User, SoftwarePolicy, ApplicationPolicy, AuditLog, Device, SoftwareTask, HelpdeskRequest, now
 from app.workflows import correct_legacy_password_requests
@@ -18,6 +18,11 @@ from auth import create_access_token
 from agent import process_request, safe_message, UnsafeRequest
 from endpoint_agent.agent import run_once
 from endpoint_agent.installer import install
+
+def registration_payload(name, email, password):
+    return {"first_name": name, "last_name": "User", "date_of_birth": "1995-06-15",
+            "username": name, "email": email, "password": password,
+            "confirm_password": password}
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -43,7 +48,7 @@ class WorkflowTests(unittest.TestCase):
         main.app.dependency_overrides.clear()
         self.engine.dispose()
     def account(self, name):
-        payload = {"name": name, "email": name + "@example.test", "password": self.password}
+        payload = registration_payload(name, name + "@example.test", self.password)
         self.assertEqual(self.client.post("/auth/register", json=payload).status_code, 201)
         return self.client.post(
             "/auth/login", json={"email": payload["email"], "password": self.password}).json()
@@ -68,10 +73,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.get("/requests").status_code, 401)
         self.assertEqual(self.client.get("/admin/users", headers=self.headers()).status_code, 403)
         self.assertEqual(self.client.get("/admin/users", headers=self.headers(self.admin)).status_code, 200)
-        self.assertEqual(self.client.post("/auth/register", json={"email":"six@example.test","name":"six",
-            "password":"abcdef"}).status_code, 201)
-        self.assertEqual(self.client.post("/auth/register", json={"email":"five@example.test","name":"five",
-            "password":"abcde"}).status_code, 422)
+        self.assertEqual(self.client.post("/auth/register", json=registration_payload('six', 'six@example.test', 'abcdef')).status_code, 201)
+        self.assertEqual(self.client.post("/auth/register", json=registration_payload('five', 'five@example.test', 'abcde')).status_code, 422)
         self.assertEqual(self.client.get('/users',headers=self.headers()).status_code,403)
         self.assertEqual(self.client.put('/users/1',headers=self.headers(),json={
             'name':'changed','email':'changed@example.test'}).status_code,403)
@@ -81,10 +84,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code,200)
         self.assertEqual(response.json()['name'],'Updated Name')
         self.assertEqual(self.client.post("/auth/login", json={"email":"employee@example.test","password":"bad"}).status_code, 401)
+        wrong = self.client.post('/auth/login', json={'identifier':'employee','password':'bad'})
+        self.assertEqual(wrong.status_code, 401)
+        self.assertEqual(wrong.json()['detail'], 'Username/email or password is wrong')
+        self.assertEqual(self.client.post('/auth/login', json={
+            'identifier':'employee', 'password':self.password}).status_code, 200)
+        self.assertEqual(self.client.post('/auth/login', json={
+            'identifier':'employee@example.test', 'password':self.password}).status_code, 200)
+        self.assertEqual(self.client.post('/auth/register', json=registration_payload(
+            'employee', 'another@example.test', self.password)).json()['detail'], 'Username already taken')
+        mismatch = registration_payload('mismatch', 'mismatch@example.test', self.password)
+        mismatch['confirm_password'] = 'different'
+        self.assertEqual(self.client.post('/auth/register', json=mismatch).status_code, 422)
         token = create_access_token(self.employee["user"]["id"], -1)
         self.assertEqual(self.client.get("/auth/me", headers={"Authorization":"Bearer "+token}).status_code, 401)
-        self.assertEqual(self.client.post("/auth/register", json={"email":"new@example.test","name":"x",
-            "password":self.password, "role":"admin"}).status_code, 422)
+        self.assertEqual(self.client.post("/auth/register", json={**registration_payload('new', 'new@example.test', self.password), "role":"admin"}).status_code, 422)
     def test_password_and_request_ownership(self):
         row = self.request(Intent.PASSWORD_RESET, "I forgot my password").json()
         self.assertEqual(row["status"], "AWAITING_USER_ACTION")
@@ -180,7 +194,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIsNotNone(db.scalar(select(AuditLog).where(AuditLog.action=='REQUEST_REJECTED')))
         sentinel = secrets.token_hex(20)
         self.assertNotIn(sentinel, safe_message("hello "+sentinel))
-        response = self.client.post("/auth/register", json={"name":"x","email":"bad","password":sentinel})
+        response = self.client.post("/auth/register", json=registration_payload('invalid', 'bad', sentinel))
         self.assertNotIn(sentinel,response.text)
     def test_duplicate_request(self):
         result = AgentResponse(intent=Intent.PASSWORD_CHANGE,message="change")
@@ -243,9 +257,23 @@ class WorkflowTests(unittest.TestCase):
             user=db.get(User,self.employee['user']['id'])
             self.assertNotEqual(user.password_hash,self.password)
             self.assertNotIn(self.password,str([(x.action,x.details) for x in db.scalars(select(AuditLog))]))
-        response=self.client.post('/auth/register',json={
-            'name':'duplicate','email':'employee@example.test','password':self.password})
+        response=self.client.post('/auth/register',json=registration_payload('duplicate', 'employee@example.test', self.password))
         self.assertEqual(response.status_code,409)
+
+    def test_existing_user_table_gets_profile_columns(self):
+        legacy_engine = create_engine('sqlite://', poolclass=StaticPool)
+        try:
+            with legacy_engine.begin() as connection:
+                connection.execute(text('CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(100), email VARCHAR(150), password_hash VARCHAR(255), role VARCHAR(50))'))
+                connection.execute(text("INSERT INTO users VALUES (1, 'Existing User', 'existing@example.test', 'hash', 'employee')"))
+            upgrade_user_profile(legacy_engine)
+            upgrade_user_profile(legacy_engine)
+            columns = {column['name'] for column in inspect(legacy_engine).get_columns('users')}
+            self.assertTrue({'first_name', 'last_name', 'date_of_birth', 'username'} <= columns)
+            with legacy_engine.connect() as connection:
+                self.assertEqual(connection.scalar(text('SELECT name FROM users WHERE id=1')), 'Existing User')
+        finally:
+            legacy_engine.dispose()
 
 class AITests(unittest.TestCase):
     def classify(self, message, result):

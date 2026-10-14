@@ -1,29 +1,61 @@
 from typing import Literal
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from datetime import date, datetime
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 class Login(Input):
-    email: str = Field(max_length=150)
+    identifier: str = Field(min_length=1, max_length=150, validation_alias=AliasChoices('identifier', 'email'))
     password: SecretStr = Field(min_length=1, max_length=256)
-    @field_validator("email")
+    @field_validator("identifier")
+    @classmethod
+    def normalize_identifier(cls, value):
+        return value.strip().lower()
+
+class Register(Input):
+    first_name: str = Field(min_length=1, max_length=50)
+    last_name: str = Field(min_length=1, max_length=50)
+    date_of_birth: date
+    username: str = Field(min_length=3, max_length=50, pattern=r'^[a-zA-Z][a-zA-Z0-9._-]*$')
+    email: str = Field(min_length=3, max_length=150)
+    password: SecretStr = Field(min_length=6, max_length=256)
+    confirm_password: SecretStr
+    @field_validator('first_name', 'last_name')
+    @classmethod
+    def strip_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError('Name is required')
+        return value
+    @field_validator('username')
+    @classmethod
+    def normalize_username(cls, value):
+        return value.strip().lower()
+    @field_validator('email')
     @classmethod
     def email_format(cls, value):
         value = value.strip().lower()
-        if "@" not in value or "." not in value.split("@")[-1]:
-            raise ValueError("A valid email is required")
+        if '@' not in value or '.' not in value.split('@')[-1]:
+            raise ValueError('A valid email is required')
         return value
-
-class Register(Login):
-    name: str = Field(min_length=1, max_length=100)
+    @field_validator('date_of_birth')
+    @classmethod
+    def past_birth_date(cls, value):
+        if value >= date.today():
+            raise ValueError('Enter a date of birth in the past')
+        return value
     @field_validator("password")
     @classmethod
     def password_length(cls, value):
         if len(value.get_secret_value()) < 6:
             raise ValueError("Use at least 6 characters")
         return value
+    @model_validator(mode='after')
+    def passwords_match(self):
+        if self.password.get_secret_value() != self.confirm_password.get_secret_value():
+            raise ValueError('Passwords do not match')
+        return self
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -31,6 +63,9 @@ class UserOut(BaseModel):
     name: str
     email: str
     role: str
+    username: str | None
+    first_name: str | None
+    last_name: str | None
 
 class UserUpdate(Input):
     name: str = Field(min_length=1, max_length=100)
@@ -38,7 +73,7 @@ class UserUpdate(Input):
     @field_validator('email')
     @classmethod
     def validate_email(cls, value):
-        return Login.email_format(value)
+        return Register.email_format(value)
 
 class TokenOut(BaseModel):
     access_token: str
