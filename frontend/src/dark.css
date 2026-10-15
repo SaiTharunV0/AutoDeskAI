@@ -1,0 +1,167 @@
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e8f2ee;
+  --muted: #a5bab2;
+  --line: #334a46;
+  --soft: #1a2d2a;
+  --paper: #1d302d;
+  --accent: #8cdeca;
+  background: #111d1b;
+  color: var(--ink);
+}
+
+[data-theme="dark"] body { background: #111d1b; color: var(--ink); }
+
+.themeToggle {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 40px; height: 40px; padding: 0;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; color: var(--teal-dark);
+}
+.themeToggle:hover { background: #eaf5ef; }
+.authBrandRow { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.authHero .themeToggle { background: #ffffff1c; border-color: #ffffff5c; color: #fff; }
+.authHero .themeToggle:hover { background: #ffffff30; }
+
+[data-theme="dark"] .authPage { background: #111d1b; }
+[data-theme="dark"] .authHero { background: radial-gradient(circle at 88% 12%, #215a50 0, transparent 36%), linear-gradient(145deg, #0c2525, #153b34 76%, #1a483e); }
+[data-theme="dark"] .authCard > div,
+[data-theme="dark"] .authStatus,
+[data-theme="dark"] .appHeader,
+[data-theme="dark"] .topNav,
+[data-theme="dark"] .card,
+[data-theme="dark"] .pageCard,
+[data-theme="dark"] .stat,
+[data-theme="dark"] .managerMetric,
+[data-theme="dark"] .modal,
+[data-theme="dark"] .knowledgeFlow,
+[data-theme="dark"] .requestArticle { background: #1d302d; border-color: var(--line); color: var(--ink); box-shadow: none; }
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea { background: #162724; border-color: #45615a; color: var(--ink); }
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder { color: #91aaa1; }
+[data-theme="dark"] label,
+[data-theme="dark"] .authRoleLabel,
+[data-theme="dark"] .deviceBar label { color: #bbd0c8; }
+[data-theme="dark"] .search { background: #162724; border-color: var(--line); color: var(--muted); }
+[data-theme="dark"] .search input { background: transparent; }
+[data-theme="dark"] .themeToggle,
+[data-theme="dark"] .bell,
+[data-theme="dark"] .logout,
+[data-theme="dark"] .secondary,
+[data-theme="dark"] .sectionHead > button.secondary,
+[data-theme="dark"] .suggestions button,
+[data-theme="dark"] .requestArticle > button:not(.request),
+[data-theme="dark"] .policy button,
+[data-theme="dark"] .deviceToggle,
+[data-theme="dark"] .textButton,
+[data-theme="dark"] .bubble button { background: #24433b; border-color: #4b7367; color: #b5f0dd; }
+[data-theme="dark"] .themeToggle:hover,
+[data-theme="dark"] .bell:hover,
+[data-theme="dark"] .logout:hover,
+[data-theme="dark"] .secondary:hover,
+[data-theme="dark"] .suggestions button:hover,
+[data-theme="dark"] .requestArticle > button:not(.request):hover,
+[data-theme="dark"] .policy button:hover,
+[data-theme="dark"] .deviceToggle:hover,
+[data-theme="dark"] .textButton:hover { background: #305b4c; border-color: #72a991; }
+[data-theme="dark"] .authHero .themeToggle { background: #ffffff1c; border-color: #ffffff5c; color: #fff; }
+[data-theme="dark"] .authHero .themeToggle:hover { background: #ffffff30; }
+[data-theme="dark"] .primary,
+[data-theme="dark"] .send { background: #177969; color: #fff; }
+[data-theme="dark"] .primary:hover:not(:disabled),
+[data-theme="dark"] .send:hover:not(:disabled) { background: #22927e; }
+
+[data-theme="dark"] .authModeTabs,
+[data-theme="dark"] .authTabs { background: #162724; border-color: var(--line); }
+[data-theme="dark"] .authModeTabs button { color: #abc2b9; }
+[data-theme="dark"] .authModeTabs button.active,
+[data-theme="dark"] .authTab { background: #29413b; color: var(--ink); border-color: var(--line); }
+[data-theme="dark"] .authTab.active { background: #285849; border-color: #70b49b; color: #d6f7e9; }
+[data-theme="dark"] .authEyebrow,
+[data-theme="dark"] .authRecoveryLink,
+[data-theme="dark"] .knowledgeFlow a,
+[data-theme="dark"] .sectionHead > button:not(.secondary) { color: var(--accent); }
+[data-theme="dark"] .formSectionTitle span,
+[data-theme="dark"] .statIcon,
+[data-theme="dark"] .reqIcon,
+[data-theme="dark"] .bot,
+[data-theme="dark"] .mini.bot,
+[data-theme="dark"] .endpointIcon,
+[data-theme="dark"] .knowledgeIcon,
+[data-theme="dark"] .pageTitle > svg,
+[data-theme="dark"] .modalIcon { background: #294b40; color: var(--accent); }
+[data-theme="dark"] .passwordToggle { color: #b9d4c8; }
+[data-theme="dark"] .passwordToggle:hover { background: #2b4d40; color: #fff; }
+
+[data-theme="dark"] .topBrand .brand b,
+[data-theme="dark"] .intro h1,
+[data-theme="dark"] .pageTitle h1,
+[data-theme="dark"] .pageCard h2,
+[data-theme="dark"] .modal h2,
+[data-theme="dark"] .modal h3,
+[data-theme="dark"] .endpointPanel .sectionHead h2,
+[data-theme="dark"] .endpointIdentity b,
+[data-theme="dark"] .enrollCard .sectionHead h2,
+[data-theme="dark"] .date b,
+[data-theme="dark"] .stat b,
+[data-theme="dark"] .managerMetric strong,
+[data-theme="dark"] .title b,
+[data-theme="dark"] .ticketRow span:not(.status) { color: var(--ink); }
+[data-theme="dark"] .topNavLink { color: #b4ccc2; }
+[data-theme="dark"] .topNavLink:hover { background: #29483e; color: #d2f6e6; }
+[data-theme="dark"] .topNavLink.active { background: #315e4f; color: #e3fff2; }
+[data-theme="dark"] .date,
+[data-theme="dark"] .chatIntro,
+[data-theme="dark"] .profile,
+[data-theme="dark"] .knowledge article,
+[data-theme="dark"] .request,
+[data-theme="dark"] .device,
+[data-theme="dark"] .tokenBox,
+[data-theme="dark"] .auditEntry,
+[data-theme="dark"] .ticketRow,
+[data-theme="dark"] .endpointCard,
+[data-theme="dark"] .employeeItem,
+[data-theme="dark"] .knowledgeRelated article { background: #243a35; border-color: var(--line); color: var(--ink); }
+[data-theme="dark"] .chat { background: #152623; border-color: var(--line); }
+[data-theme="dark"] .bubble { background: #29413a; border-color: #3a6153; color: var(--ink); }
+[data-theme="dark"] .row.user .bubble { background: #176f62; border-color: #2a9180; color: #fff; }
+[data-theme="dark"] .mini.person { background: #38554b; color: #dcf4e8; }
+[data-theme="dark"] .request:hover,
+[data-theme="dark"] .endpointCard:hover,
+[data-theme="dark"] .employeeItem.selected,
+[data-theme="dark"] .endpointCard.selected { background: #2b5041; border-color: #77ac8f; }
+[data-theme="dark"] .requestArticle p,
+[data-theme="dark"] .knowledgeFlow li,
+[data-theme="dark"] .knowledgeLead p,
+[data-theme="dark"] .knowledgeNotice p,
+[data-theme="dark"] .knowledgeRelated p { color: #c1d5cc; }
+[data-theme="dark"] .knowledgeLead,
+[data-theme="dark"] .knowledgeNotice,
+[data-theme="dark"] .simulation,
+[data-theme="dark"] .note { background: #234336; border-color: #416d57; color: #d0eddd; }
+[data-theme="dark"] .knowledgeLead b { color: var(--ink); }
+[data-theme="dark"] .role,
+[data-theme="dark"] .employeeAvatar,
+[data-theme="dark"] .x { background: #345447; color: #d5f4e3; }
+[data-theme="dark"] .chartTrack { background: #334c43; }
+[data-theme="dark"] .empty { background: #1a3029; border-color: #50705f; color: var(--muted); }
+[data-theme="dark"] .error { background: #492c2b; border-color: #85504a; color: #ffd0c7; }
+[data-theme="dark"] .error button { color: #ffd0c7; }
+[data-theme="dark"] .clarify { background: #4d4225; border-color: #816c39; color: #ffe5a4; }
+[data-theme="dark"] .clarify button { color: #ffe5a4; }
+[data-theme="dark"] .status.pending,
+[data-theme="dark"] .status.processing,
+[data-theme="dark"] .status.needs_clarification,
+[data-theme="dark"] .connectionStatus.offline { background: #5b4727; color: #ffe0a0; }
+[data-theme="dark"] .status.awaiting_user_action { background: #254b58; color: #b9ecf5; }
+[data-theme="dark"] .status.completed,
+[data-theme="dark"] .status.success,
+[data-theme="dark"] .status.active,
+[data-theme="dark"] .connectionStatus.connected { background: #275140; color: #a9edc4; }
+[data-theme="dark"] .status.failed,
+[data-theme="dark"] .status.rejected,
+[data-theme="dark"] .status.disabled,
+[data-theme="dark"] .connectionStatus.disabled { background: #592d2e; color: #ffbbb6; }

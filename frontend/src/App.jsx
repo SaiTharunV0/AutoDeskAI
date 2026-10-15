@@ -1,11 +1,14 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState}from'react';
-import{Activity,AlertCircle,Bell,BookOpen,Bot,CheckCircle2,Clock3,Eye,EyeOff,FileText,Grid2X2,Home,KeyRound,Laptop,LogOut,MonitorDown,Search,Send,Settings,ShieldCheck,Ticket,UserCircle2,Users,X}from'lucide-react';
+import{Activity,AlertCircle,Bell,BookOpen,Bot,CheckCircle2,Clock3,Eye,EyeOff,FileText,Grid2X2,Home,KeyRound,Laptop,LogOut,Moon,MonitorDown,Search,Send,Settings,ShieldCheck,Sun,Ticket,UserCircle2,Users,X}from'lucide-react';
 import {startPolling} from './polling.js';
 import {requestApi, isConnectionError, SESSION_ERROR} from './api.js';
 import {attachPageGestures} from './gestures.js';
 
 const keepIfEqual=(current,next)=>JSON.stringify(current)===JSON.stringify(next)?current:next;
 const sessionKey='autodeskai.session.token';
+const themeKey='autodeskai.theme';
+const readTheme=()=>{try{const saved=window.localStorage.getItem(themeKey);return saved==='dark'||saved==='light'?saved:window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch{return'light'}};
+document.documentElement.dataset.theme=readTheme();
 const readStoredToken=()=>{try{return window.sessionStorage.getItem(sessionKey)||''}catch{return''}};
 const storeToken=value=>{try{if(value)window.sessionStorage.setItem(sessionKey,value);else window.sessionStorage.removeItem(sessionKey)}catch{/* Private browsing can block storage. */}};
 
@@ -19,6 +22,8 @@ const formatShortDate=value=>{if(!value)return'—';const date=parseDate(value);
 const deviceOnline=device=>{const lastSeen=parseDate(device.last_seen);return device.status==='ACTIVE'&&!Number.isNaN(lastSeen.getTime())&&Date.now()-lastSeen.getTime()<=120000;};
 
 export default function App(){
+ const[theme,setTheme]=useState(readTheme);
+ useEffect(()=>{document.documentElement.dataset.theme=theme;try{window.localStorage.setItem(themeKey,theme)}catch{/* Storage may be unavailable. */}},[theme]);
  const[token,setToken]=useState(readStoredToken),[user,setUser]=useState(null),[mode,setMode]=useState('login');
  const[restoring,setRestoring]=useState(Boolean(token)),[restoreError,setRestoreError]=useState(''),[restoreAttempt,setRestoreAttempt]=useState(0);
  const[requests,setRequests]=useState([]),[devices,setDevices]=useState([]),[chat,setChat]=useState([]),[msg,setMsg]=useState(''),[search,setSearch]=useState(''),[selectedDevice,setSelectedDevice]=useState(''),[clarify,setClarify]=useState(null),[retryKey,setRetryKey]=useState(null);
@@ -66,10 +71,10 @@ export default function App(){
  const openEnrollment=useCallback(()=>setActive('Admin Panel'),[setActive]);
  if(restoring)return <div className="authStatus" role="status">Restoring your session…</div>;
  if(restoreError)return <div className="authStatus" role="alert"><p>{restoreError}</p><button className="primary" type="button" onClick={()=>setRestoreAttempt(value=>value+1)}>Try again</button><button className="secondary" type="button" onClick={logout}>Sign out</button></div>;
- if(!user)return <Auth mode={mode} setMode={setMode} submit={authenticate} busy={busy} error={error} authRole={authRole} setAuthRole={setAuthRole}/>;
+ if(!user)return <Auth mode={mode} setMode={setMode} submit={authenticate} busy={busy} error={error} authRole={authRole} setAuthRole={setAuthRole} theme={theme} setTheme={setTheme}/>;
  const nav=user.role==='admin'?[['Dashboard',Home],['Admin Panel',Users],['Audit Logs',Activity]]:[['Dashboard',Home],['My Requests',Ticket],['Knowledge Base',BookOpen],['Settings',Settings]];
  const resolved=requests.filter(x=>x.status==='COMPLETED').length,progress=requests.filter(x=>['PENDING','PROCESSING','AWAITING_USER_ACTION'].includes(x.status)).length,needs=requests.filter(x=>x.status==='NEEDS_CLARIFICATION').length;
- return <div className="app"><main><header className="appHeader"><div className="topBrand"><Brand/></div><div className="search"><Search size={18}/><input value={search} onChange={e=>{setSearch(e.target.value);if(e.target.value.trim())setActive(user.role==='admin'?'Admin Panel':'My Requests')}} placeholder="Search requests..." aria-label="Search requests"/></div><div className="headRight">{user.role!=='admin'&&<button className="bell" type="button" aria-label={`${needs} requests need input`} onClick={()=>setActive('My Requests')}><Bell size={19}/>{needs>0&&<i>{needs}</i>}</button>}<div className="user"><div className="avatar">{initials(user.name)}</div><div><b>{user.name}</b><small>{user.role}</small></div></div><button className="logout" type="button" aria-label="Sign out" onClick={logout}><LogOut size={18}/></button></div></header><nav className="topNav" aria-label="Main navigation">{nav.map(([n,I])=><button key={n} type="button" className={active===n?'topNavLink active':'topNavLink'} aria-current={active===n?'page':undefined} onClick={()=>setActive(n)}><I size={17}/><span>{n}</span></button>)}</nav><section className="content">{error&&<div className="error" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={()=>setError('')}><X size={15}/></button></div>}<div className="simulation"><ShieldCheck size={16}/>Microsoft handles organization password actions. Software and application access remain simulated.</div>
+ return <div className="app"><main><header className="appHeader"><div className="topBrand"><Brand/></div><div className="search"><Search size={18}/><input value={search} onChange={e=>{setSearch(e.target.value);if(e.target.value.trim())setActive(user.role==='admin'?'Admin Panel':'My Requests')}} placeholder="Search requests..." aria-label="Search requests"/></div><div className="headRight"><ThemeToggle theme={theme} setTheme={setTheme}/>{user.role!=='admin'&&<button className="bell" type="button" aria-label={`${needs} requests need input`} onClick={()=>setActive('My Requests')}><Bell size={19}/>{needs>0&&<i>{needs}</i>}</button>}<div className="user"><div className="avatar">{initials(user.name)}</div><div><b>{user.name}</b><small>{user.role}</small></div></div><button className="logout" type="button" aria-label="Sign out" onClick={logout}><LogOut size={18}/></button></div></header><nav className="topNav" aria-label="Main navigation">{nav.map(([n,I])=><button key={n} type="button" className={active===n?'topNavLink active':'topNavLink'} aria-current={active===n?'page':undefined} onClick={()=>setActive(n)}><I size={17}/><span>{n}</span></button>)}</nav><section className="content">{error&&<div className="error" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={()=>setError('')}><X size={15}/></button></div>}<div className="simulation"><ShieldCheck size={16}/>Microsoft handles organization password actions. Software and application access remain simulated.</div>
  {active==='Dashboard'&&user.role==='admin'&&<MemoManagerDashboard requests={filteredAdminRequests} users={admin.users} devices={admin.devices} onEnroll={openEnrollment}/>}{active==='Dashboard'&&user.role!=='admin'&&<><div className="dashboardHero"><div><span className="eyebrow">YOUR IT WORKSPACE</span><h1>Welcome back, {user.name.split(' ')[0]}</h1><p>Describe your issue below. Follow its progress in My Requests.</p></div><div className="heroDate"><Clock3 size={18}/><span>{new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</span></div></div><div className="stats">{[['Total requests',requests.length,Ticket,'All your submitted requests'],['Resolved',resolved,CheckCircle2,'Completed requests'],['In progress',progress,Clock3,'Waiting or being handled'],['Needs input',needs,AlertCircle,'Your reply is needed']].map(([n,v,I,detail],i)=><div className="stat" key={n}><div className={'statIcon s'+i}><I size={19}/></div><span>{n}</span><b>{v}</b><small>{detail}</small></div>)}</div><div className="dashboardChat"><Chat full chat={chat} msg={msg} setMsg={setMsg} send={send} busy={busy} devices={devices} selected={selectedDevice} setSelected={setSelectedDevice} clarify={clarify} cancel={()=>setClarify(null)} passwordAction={passwordAction}/></div></>}
  {user.role!=='admin'&&active==='My Requests'&&<Requests rows={filtered} open={setModal} passwordAction={passwordAction} reply={id=>{setClarify(id);setActive('Dashboard')}}/>}
  {user.role!=='admin'&&active==='Knowledge Base'&&<Knowledge/>}{user.role!=='admin'&&active==='Settings'&&<Profile user={user} devices={devices}/>}
@@ -77,7 +82,8 @@ export default function App(){
 }
 
 function Brand(){return <div className="brand"><div className="brandIcon"><img src="/logo.png?v=2" alt=""/></div><div><b>AutoDeskAI</b><small>AI Powered IT Helpdesk</small></div></div>}
-function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole}){
+function ThemeToggle({theme,setTheme}){return <button className="themeToggle" type="button" onClick={()=>setTheme(theme==='dark'?'light':'dark')} aria-label={`Switch to ${theme==='dark'?'light':'dark'} mode`} title={`Switch to ${theme==='dark'?'light':'dark'} mode`}>{theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</button>}
+function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole,theme,setTheme}){
  const isManager=authRole==='admin';
  const [showRecovery,setShowRecovery]=useState(false),[showPassword,setShowPassword]=useState(false);
  const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);
@@ -86,7 +92,7 @@ function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole}){
  return <div className={'authPage '+(mode==='register'?'registerPage':'')}>
   <section className="authHero">
    <div className="authHeroInner">
-    <Brand/>
+    <div className="authBrandRow"><Brand/><ThemeToggle theme={theme} setTheme={setTheme}/></div>
     <div className="authHeroCopy"><span className="authEyebrow">A CLEARER WAY TO GET SUPPORT</span><h1>IT help that keeps your day moving.</h1><p>Ask for help, follow your requests, and see what happens next in one calm workspace.</p></div>
     <div className="heroPoints"><span><ShieldCheck size={18}/>Protected actions</span><span><Activity size={18}/>Visible progress</span><span><Bot size={18}/>Guided requests</span></div>
    </div>
