@@ -78,23 +78,49 @@ function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole}){
  const [showRecovery,setShowRecovery]=useState(false),[showPassword,setShowPassword]=useState(false);
  const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);
  const latestBirthDate=`${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
- return <div className="authPage"><section className="authHero"><Brand/><h1>IT support that understands your request.</h1><p>Securely request password help, approved software, or application access from one workspace.</p><div className="heroPoints"><span><ShieldCheck/>Backend-controlled authorization</span><span><Activity/>Complete audit history</span><span><Bot/>Private AI classification</span></div></section><section className={'authCard '+(mode==='register'?'register':'')}><div>
-  <div className="authTabs"><button type="button" disabled={busy} className={authRole==='employee'?'authTab active':'authTab'} onClick={()=>{setAuthRole('employee');setShowRecovery(false)}}>{mode==='register'?'Employee Sign Up':'Employee Sign In'}</button><button type="button" disabled={busy} className={authRole==='admin'?'authTab active':'authTab'} onClick={()=>{setAuthRole('admin');setShowRecovery(false)}}>{mode==='register'?'Admin Sign Up':'Admin / Manager'}</button></div>
-  {showRecovery?<div className="recoveryNotice"><h2>Forgot password?</h2><p>Self-service password recovery is not configured for this deployment. Contact your IT administrator to regain access to your account.</p><p>Microsoft organization password recovery is separate from this AutoDeskAI login. Sign in to submit a tracked organization request.</p><button type="button" className="primary" onClick={()=>setShowRecovery(false)}>Back to sign in</button></div>:<>
-   <h2>{mode==='login'?(isManager?'Manager sign in':'Welcome back'):isManager?'Create administrator account':'Create employee account'}</h2>
-   <p>{mode==='login'?(isManager?'Review employees, pending work, and completed requests.':'Sign in with your username or registered email.'):isManager?'Create an administrator profile with a private invite code provided by your organization.':'Create your profile to open the service desk.'}</p>
-   {error&&<div className="error" role="alert">{error}</div>}
-   <form onSubmit={submit} aria-busy={busy} className={mode==='register'?'registrationForm':''}>
-    {mode==='register'&&<><div className="formPair"><label>First name<input name="first_name" required maxLength="50" autoComplete="given-name"/></label><label>Last name<input name="last_name" required maxLength="50" autoComplete="family-name"/></label></div><div className="formPair"><label>Date of birth<input name="date_of_birth" type="date" required max={latestBirthDate} autoComplete="bday"/></label><label>Username<input name="username" required minLength="3" maxLength="50" pattern="[a-zA-Z][a-zA-Z0-9._-]*" title="Start with a letter; use letters, numbers, dots, underscores, or hyphens." autoComplete="username"/></label></div><label>Email address<input name="email" type="email" required maxLength="150" autoComplete="email"/></label>{isManager&&<label>Administrator invite code<input name="admin_invite_code" type="password" required maxLength="256" autoComplete="off"/></label>}</>}
-    {mode==='login'&&<label>Username or email<input name="identifier" required maxLength="150" autoComplete="username"/></label>}
-    <label>Password<div className="passwordField"><input name="password" type={showPassword?'text':'password'} required minLength={mode==='register'?6:1} maxLength="256" autoComplete={mode==='login'?'current-password':'new-password'}/><button type="button" className="passwordToggle" aria-label={showPassword?'Hide password':'Show password'} aria-pressed={showPassword} onClick={()=>setShowPassword(value=>!value)}>{showPassword?<EyeOff size={18}/>:<Eye size={18}/>}</button></div></label>
-    {mode==='register'&&<><label>Confirm password<input name="confirm_password" type={showPassword?'text':'password'} required minLength="6" maxLength="256" autoComplete="new-password"/></label><small>Use at least 6 characters.</small></>}
-    <button className="primary" disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':isManager?'Create administrator account':'Create employee account'}</button>
-   </form>
-   {mode==='login'&&<button type="button" className="authRecoveryLink" onClick={()=>setShowRecovery(true)}>Forgot password?</button>}
-   <button type="button" disabled={busy} className="authSwitch" onClick={()=>setMode(mode==='login'?'register':'login')}>{mode==='login'?'New here? Create an account':'Already registered? Sign in'}</button>
-  </>}
- </div></section></div>
+ const changeMode=next=>{setMode(next);setShowRecovery(false)};
+ return <div className={'authPage '+(mode==='register'?'registerPage':'')}>
+  <section className="authHero">
+   <div className="authHeroInner">
+    <Brand/>
+    <div className="authHeroCopy"><span className="authEyebrow">A CLEARER WAY TO GET SUPPORT</span><h1>IT help that keeps your day moving.</h1><p>Ask for help, follow your requests, and see what happens next in one calm workspace.</p></div>
+    <div className="authPreview" aria-label="Example helpdesk workflow">
+     <div className="authPreviewTop"><span>EXAMPLE WORKFLOW</span><span className="previewPulse">Guided</span></div>
+     <div className="authPreviewBody"><span className="previewIcon"><KeyRound size={21}/></span><div><b>Password help</b><small>Continue securely with Microsoft</small></div><CheckCircle2 size={21}/></div>
+     <div className="authPreviewFoot"><span>Request created</span><i/><span>Next step ready</span></div>
+    </div>
+    <div className="heroPoints"><span><ShieldCheck size={18}/>Protected actions</span><span><Activity size={18}/>Visible progress</span><span><Bot size={18}/>Guided requests</span></div>
+   </div>
+  </section>
+  <section className={'authCard '+(mode==='register'?'register':'')}><div className="authPanel">
+   <div className="authModeTabs" role="group" aria-label="Account action"><button type="button" disabled={busy} className={mode==='login'?'active':''} aria-pressed={mode==='login'} onClick={()=>changeMode('login')}>Sign in</button><button type="button" disabled={busy} className={mode==='register'?'active':''} aria-pressed={mode==='register'} onClick={()=>changeMode('register')}>Create account</button></div>
+   <div className="authRoleLabel">Choose your workspace</div>
+   <div className="authTabs" role="group" aria-label="Account type">
+    <button type="button" disabled={busy} className={authRole==='employee'?'authTab active':'authTab'} aria-pressed={authRole==='employee'} onClick={()=>{setAuthRole('employee');setShowRecovery(false)}}><UserCircle2 size={19}/><span><b>Employee</b><small>Get IT support</small></span></button>
+    <button type="button" disabled={busy} className={authRole==='admin'?'authTab active':'authTab'} aria-pressed={authRole==='admin'} onClick={()=>{setAuthRole('admin');setShowRecovery(false)}}><ShieldCheck size={19}/><span><b>Administrator</b><small>Manage the desk</small></span></button>
+   </div>
+   {showRecovery?<div className="recoveryNotice"><span className="authEyebrow">ACCOUNT HELP</span><h2>Forgot password?</h2><p>Self-service password recovery is not configured for this deployment. Contact your IT administrator to regain access to your account.</p><p>Microsoft organization password recovery is separate from this AutoDeskAI login. Sign in to submit a tracked organization request.</p><button type="button" className="primary" onClick={()=>setShowRecovery(false)}>Back to sign in</button></div>:<>
+    <div className="authHeading"><span className="authEyebrow">{mode==='register'?'NEW ACCOUNT':'WELCOME BACK'}</span><h2>{mode==='login'?(isManager?'Administrator sign in':'Sign in to your workspace'):isManager?'Create an administrator account':'Create your employee account'}</h2><p>{mode==='login'?'Use your username or registered email to continue.':isManager?'You will need the private invite code from your organization.':'Your service desk profile starts here.'}</p></div>
+    {error&&<div className="error" role="alert">{error}</div>}
+    <form onSubmit={submit} aria-busy={busy} className={mode==='register'?'registrationForm':''}>
+     {mode==='register'&&<>
+      <div className="formSectionTitle"><span>01</span><div><b>Personal details</b><small>Tell us who you are</small></div></div>
+      <div className="formPair"><label>First name<input name="first_name" required maxLength="50" autoComplete="given-name" placeholder="First name"/></label><label>Last name<input name="last_name" required maxLength="50" autoComplete="family-name" placeholder="Last name"/></label></div>
+      <div className="formPair"><label>Date of birth<input name="date_of_birth" type="date" required max={latestBirthDate} autoComplete="bday"/></label><label>Username<input name="username" required minLength="3" maxLength="50" pattern="[a-zA-Z][a-zA-Z0-9._-]*" title="Start with a letter; use letters, numbers, dots, underscores, or hyphens." autoComplete="username" placeholder="Choose a username"/></label></div>
+      <div className="formSectionTitle"><span>02</span><div><b>Account access</b><small>Keep your sign in details private</small></div></div>
+      <label>Email address<input name="email" type="email" required maxLength="150" autoComplete="email" placeholder="you@company.com"/></label>
+      {isManager&&<label>Administrator invite code<input name="admin_invite_code" type="password" required maxLength="256" autoComplete="off" placeholder="Code from your organization"/></label>}
+     </>}
+     {mode==='login'&&<label>Username or email<input name="identifier" required maxLength="150" autoComplete="username" placeholder="you@company.com or username"/></label>}
+     <label>Password<div className="passwordField"><input name="password" type={showPassword?'text':'password'} required minLength={mode==='register'?6:1} maxLength="256" autoComplete={mode==='login'?'current-password':'new-password'} placeholder={mode==='register'?'Create a password':'Enter your password'}/><button type="button" className="passwordToggle" aria-label={showPassword?'Hide password':'Show password'} aria-pressed={showPassword} onClick={()=>setShowPassword(value=>!value)}>{showPassword?<EyeOff size={18}/>:<Eye size={18}/>}</button></div></label>
+     {mode==='register'&&<><label>Confirm password<input name="confirm_password" type={showPassword?'text':'password'} required minLength="6" maxLength="256" autoComplete="new-password" placeholder="Repeat your password"/></label><small className="formHelp">Use at least 6 characters.</small></>}
+     <button className="primary authSubmit" disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':isManager?'Create administrator account':'Create employee account'}</button>
+    </form>
+    {mode==='login'&&<button type="button" className="authRecoveryLink" onClick={()=>setShowRecovery(true)}>Forgot password?</button>}
+   </>}
+   <div className="authPanelFoot"><ShieldCheck size={15}/>Your account is protected by role based access.</div>
+  </div></section>
+ </div>;
 }
 function Chat({chat,msg,setMsg,send,busy,devices,selected,setSelected,clarify,cancel,full,passwordAction}){
  const chatLog=useRef(null);
@@ -106,7 +132,7 @@ function Chat({chat,msg,setMsg,send,busy,devices,selected,setSelected,clarify,ca
   <div className="deviceBar"><label htmlFor={full?'chat-device-full':'chat-device-dashboard'}>Installation device<select id={full?'chat-device-full':'chat-device-dashboard'} value={selected} onChange={e=>setSelected(e.target.value)}><option value="">Select a registered device</option>{devices.filter(x=>x.status==='ACTIVE').map(x=><option value={x.id} key={x.id}>{x.hostname} · {x.os_info}</option>)}</select></label>{!devices.length&&<small>An administrator must enroll your device before installation.</small>}</div>
   <div className="chat" ref={chatLog} role="log" aria-live="polite" aria-label="Conversation">{chat.map((m,i)=><div className={m.r==='user'?'row user':'row'} key={i}>{m.r==='bot'&&<div className="mini bot"><Bot size={15}/></div>}<div className="bubble">{m.t}{m.id&&<small>Request #{m.id} · {label(m.status)}</small>}{m.status==='AWAITING_USER_ACTION'&&<button type="button" onClick={()=>passwordAction(m.id)}>Continue at Microsoft</button>}</div>{m.r==='user'&&<div className="mini person"><UserCircle2 size={20}/></div>}</div>)}{busy&&<div className="row"><div className="mini bot"><Bot size={15}/></div><div className="bubble">Classifying or opening your request…</div></div>}</div>
   {clarify&&<div className="clarify">Replying to request #{clarify}<button type="button" onClick={cancel}>Cancel</button></div>}
-  <form className="composer" onSubmit={e=>{e.preventDefault();send()}}><input aria-label="Your IT request" value={msg} onChange={e=>setMsg(e.target.value)} maxLength="1000" placeholder="Describe what you need help with…"/><button className="send" type="submit" aria-label="Send request" disabled={busy||!msg.trim()}><Send size={17}/></button></form>
+  <form className="composer" onSubmit={e=>{e.preventDefault();send()}}><input aria-label="Your IT request" value={msg} onChange={e=>setMsg(e.target.value)} maxLength="1000" placeholder="Describe what you need help with…"/><button className="send" type="submit" aria-label="Send request" disabled={busy||!msg.trim()}><span>Send</span><Send size={17}/></button></form>
  </section>
 }
 function Quick({send,all,software}){return <section className="card quick"><div className="sectionHead"><div><h2>Quick actions</h2><p>Start with a common request</p></div></div><div className="quickGrid">{[['Reset password','Microsoft-hosted recovery',KeyRound,()=>send('I forgot my password')],['Install software','Choose a registered device',MonitorDown,software],['Application access','Request Tableau access',Grid2X2,()=>send('I need access to Tableau')],['View requests','Check request history',FileText,all]].map(([n,d,I,action])=><button type="button" key={n} onClick={action}><div className="qicon"><I size={17}/></div><div><b>{n}</b><small>{d}</small></div></button>)}</div></section>}
