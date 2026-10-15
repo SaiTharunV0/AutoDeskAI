@@ -37,7 +37,7 @@ input:hover, select:hover, textarea:hover { border-color: #9dbdb3; }
 .authHero::after { width: 640px; height: 640px; left: -420px; bottom: -330px; }
 .authHeroInner { position: relative; z-index: 1; width: min(100%, 560px); margin: auto; }
 .authHero .brand { height: auto; gap: 12px; }
-.authHero .brandIcon { width: 44px; height: 44px; background: #d9f1e6; color: #16483f; }
+.authHero .brandIcon { width: 44px; height: 44px; }
 .authHero .brand b { color: #fff; }
 .authHero .brand small { color: #b8d4cc; }
 .authHeroCopy { margin-top: clamp(48px, 8vh, 92px); }
@@ -96,7 +96,8 @@ input:hover, select:hover, textarea:hover { border-color: #9dbdb3; }
 .appHeader { height: 76px; background: #fff; border-color: var(--line); box-shadow: 0 2px 14px #173c3608; }
 .app, .app > main, .content, .dashboardChat, .assistant, .managerDashboard, .pageCard { min-width: 0; }
 .topBrand { flex-basis: 215px; }
-.brandIcon { background: var(--teal); border-radius: 11px; }
+.brandIcon { overflow: hidden; background: #fff; border-radius: 11px; }
+.brandIcon img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .topBrand .brand b { color: var(--ink); letter-spacing: -.02em; }
 .topBrand .brand small { color: var(--muted); }
 .topNav { top: 76px; gap: 4px; padding-block: 10px; background: #fff; border-color: var(--line); }
