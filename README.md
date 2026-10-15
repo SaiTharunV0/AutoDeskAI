@@ -110,10 +110,22 @@ This uses actual Ollama classification, PostgreSQL records and the endpoint-agen
 # Or the existing unittest entry point:
 .\.venv\Scripts\python.exe -m unittest test -v
 cd frontend
+npm.cmd test
 npm.cmd run build
 ```
 
 Automated tests use an isolated in-memory SQLite database and mocked model responses; they never modify your PostgreSQL users or need a running model. The live demo separately exercises PostgreSQL and Ollama.
+
+## Performance and reliability
+
+- Employee requests refresh every 15 seconds while work is pending or processing; device lists refresh every 60 seconds. Mutations refresh the relevant data immediately. Admin requests refresh every 15 seconds, users/devices every 60 seconds, catalog settings every 120 seconds, and audit logs every 30 seconds while the Audit Logs page is open. Steady-state admin dashboard traffic drops from roughly 17 to 6.5 reads per minute (excluding initial loads and manual actions).
+- Polling pauses in hidden tabs, coalesces refreshes, and never overlaps reads for the same job. Repeated failures back off to a maximum of two minutes. HTTP calls time out after 60 seconds, or 120 seconds for AI-assisted request creation; mutations are not automatically retried. A manual retry reuses its idempotency key only for an identical request.
+- Request lists batch their related tasks. The regression test checks that a 60-request response needs at most four SQL SELECTs, including authentication and expiration checks. Startup adds missing device, task, request, and audit lookup indexes to existing tables without deleting data. Index creation can lengthen the first deployment on a large database.
+- Idle expiration checks avoid empty commits, task dispatch batches policy lookups, and model classification releases the database connection while waiting. The model client reuses its HTTP connection pool. Large JSON responses use gzip compression.
+- Endpoint agents poll every 10 seconds by default (`AGENT_POLL_SECONDS`, range 1–60), cache identity heartbeats for 30 seconds, and slow down during failures. Task polls still update device presence. Finalized or expired task reports no longer block new work.
+- React and icon code are built as separate bundles; Vercel caches hashed assets for one year and marks API responses `no-store`. The frontend test suite covers polling, timeouts, cancellation, and swipe gestures. GitHub Actions runs the isolated backend tests, frontend tests, and production build on pushes to `main`/`backend` and on pull requests.
+
+These changes do not eliminate hosting cold starts: a sleeping Render free service can still delay the first sign-in. Live PostgreSQL latency and end-to-end browser timing should be measured after deployment; local test timings are not production benchmarks.
 
 ## Hosted deployment (Vercel + Render + Supabase)
 

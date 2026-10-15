@@ -24,3 +24,12 @@ def upgrade_user_profile(db_engine=engine):
 def get_db():
     with SessionLocal() as db:
         yield db
+
+def upgrade_query_indexes(db_engine=engine):
+    """create_all does not add new indexes to tables in an existing installation."""
+    names = {"ix_devices_owner", "ix_devices_token", "ix_requests_user_id",
+             "ix_tasks_status_created", "ix_tasks_device_status", "ix_audit_resource"}
+    for table in Base.metadata.sorted_tables:
+        for index in table.indexes:
+            if index.name in names:
+                index.create(db_engine, checkfirst=True)

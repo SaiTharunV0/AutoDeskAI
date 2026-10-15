@@ -6,16 +6,16 @@ os.environ["JWT_SECRET_KEY"] = secrets.token_urlsafe(48)
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, inspect, select, text, event
 from sqlalchemy.pool import StaticPool
 from app import main
-from app.database import Base, get_db, upgrade_user_profile
+from app.database import Base, get_db, upgrade_user_profile, upgrade_query_indexes
 from sqlalchemy.orm import sessionmaker
 from app.models import User, SoftwarePolicy, ApplicationPolicy, AuditLog, Device, SoftwareTask, HelpdeskRequest, now
-from app.workflows import correct_legacy_password_requests
+from app.workflows import correct_legacy_password_requests, expire_tasks
 from schema import AgentResponse, Intent
 from auth import create_access_token
-from agent import process_request, safe_message, UnsafeRequest
+from agent import process_request, safe_message, UnsafeRequest, get_model_client, close_model_client
 from endpoint_agent.agent import run_once
 from endpoint_agent.installer import install
 
@@ -275,8 +275,138 @@ class WorkflowTests(unittest.TestCase):
         finally:
             legacy_engine.dispose()
 
+    def test_request_lists_use_constant_query_count(self):
+        device = self.enroll()
+        with self.sessions() as db:
+            for i in range(60):
+                row = HelpdeskRequest(user_id=self.employee['user']['id'], intent='SOFTWARE_INSTALL',
+                    status='COMPLETED', message='Done', idempotency_key=f'query-check-{i}')
+                db.add(row)
+                db.flush()
+                db.add(SoftwareTask(request_id=row.id, device_id=device['device']['id'],
+                    software='vscode', status='COMPLETED'))
+            db.commit()
+        queries = []
+        def record(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith('SELECT'):
+                queries.append(statement)
+        event.listen(self.engine, 'before_cursor_execute', record)
+        try:
+            for path, account in [('/requests', self.employee), ('/admin/requests', self.admin)]:
+                queries.clear()
+                response = self.client.get(path, headers=self.headers(account))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(len(response.json()), 60)
+                self.assertEqual(response.headers.get('content-encoding'), 'gzip')
+                self.assertLess(int(response.headers['content-length']), len(response.content))
+                self.assertTrue(all(row['task']['software'] == 'vscode' for row in response.json()))
+                self.assertLessEqual(len(queries), 4, f'{path}: {len(queries)} SELECTs for 60 rows')
+        finally:
+            event.remove(self.engine, 'before_cursor_execute', record)
+
+    def test_query_indexes_upgrade_existing_tables_idempotently(self):
+        names = {'ix_devices_owner', 'ix_devices_token', 'ix_requests_user_id',
+                 'ix_tasks_status_created', 'ix_tasks_device_status', 'ix_audit_resource'}
+        for table in Base.metadata.sorted_tables:
+            for index in table.indexes:
+                if index.name in names:
+                    index.drop(self.engine)
+        upgrade_query_indexes(self.engine)
+        upgrade_query_indexes(self.engine)
+        inspector = inspect(self.engine)
+        present = {index['name'] for table in Base.metadata.sorted_tables
+                   for index in inspector.get_indexes(table.name)}
+        self.assertTrue(names <= present)
+        with self.sessions() as db:
+            self.assertIsNotNone(db.get(User, self.employee['user']['id']))
+
+    def test_idle_expiration_does_not_commit(self):
+        with self.sessions() as db, patch.object(db, 'commit', wraps=db.commit) as commit:
+            expire_tasks(db)
+            commit.assert_not_called()
+
+    def test_model_call_releases_database_connection(self):
+        active = [0]
+        def checkout(*args): active[0] += 1
+        def checkin(*args): active[0] -= 1
+        def classify(*args):
+            self.assertEqual(active[0], 0, 'Model call held a database connection')
+            return AgentResponse(intent=Intent.CHAT, message='Hello')
+        event.listen(self.engine, 'checkout', checkout)
+        event.listen(self.engine, 'checkin', checkin)
+        try:
+            with patch('app.workflows.process_request', side_effect=classify):
+                response = self.client.post('/requests', headers=self.headers(), json={
+                    'message': 'hello', 'idempotency_key': 'connection-release-test'})
+            self.assertEqual(response.status_code, 201)
+        finally:
+            event.remove(self.engine, 'checkout', checkout)
+            event.remove(self.engine, 'checkin', checkin)
+
+    def test_admin_invite_gate_and_role_portals(self):
+        payload = {**registration_payload('invited', 'invited@example.test', self.password), 'account_role': 'admin'}
+        code = secrets.token_urlsafe(32)
+        with patch.object(main.config, 'ADMIN_REGISTRATION_CODE', ''):
+            self.assertEqual(self.client.post('/auth/register', json=payload).status_code, 503)
+        with patch.object(main.config, 'ADMIN_REGISTRATION_CODE', code):
+            self.assertEqual(self.client.post('/auth/register', json=payload).status_code, 403)
+            self.assertEqual(self.client.post('/auth/register', json={**payload, 'admin_invite_code': 'wrong'}).status_code, 403)
+            response = self.client.post('/auth/register', json={**payload, 'admin_invite_code': code})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['user']['role'], 'admin')
+        self.assertNotIn(code, response.text)
+        self.assertEqual(self.client.get('/admin/users', headers=self.headers(response.json())).status_code, 200)
+        for identifier, role in [('invited', 'employee'), ('employee', 'admin')]:
+            self.assertEqual(self.client.post('/auth/login', json={
+                'identifier': identifier, 'password': self.password, 'expected_role': role}).status_code, 403)
+
+class EndpointEfficiencyTests(unittest.TestCase):
+    def test_heartbeat_identity_cache_expires(self):
+        import httpx
+        from endpoint_agent.api import AgentAPI
+        clock, paths = [0], []
+        def handle(request):
+            paths.append(request.url.path)
+            return httpx.Response(200, json={'id': 1, 'device_id': 'endpoint-test'})
+        api = AgentAPI('https://example.test', 'test-token', transport=httpx.MockTransport(handle), now=lambda: clock[0])
+        try:
+            api.heartbeat()
+            clock[0] = 10
+            api.heartbeat()
+            self.assertEqual(len(paths), 1)
+            clock[0] = 31
+            api.heartbeat()
+            self.assertEqual(len(paths), 2)
+        finally:
+            api.close()
+
+    def test_terminal_result_conflict_does_not_block_new_tasks(self):
+        import httpx
+        from unittest.mock import Mock
+        for status in (404, 409, 503):
+            api = Mock()
+            api.heartbeat.return_value = {'id': 1, 'device_id': 'endpoint-test'}
+            api.tasks.return_value = []
+            response = httpx.Response(status, request=httpx.Request('POST', 'https://example.test/result'))
+            api.report.side_effect = httpx.HTTPStatusError('report rejected', request=response.request, response=response)
+            pending = {1: {'success': True, 'simulated': True}}
+            if status == 503:
+                with self.assertRaises(httpx.HTTPStatusError):
+                    run_once(api, 'endpoint-test', pending=pending)
+                self.assertIn(1, pending)
+                api.tasks.assert_not_called()
+            else:
+                run_once(api, 'endpoint-test', pending=pending)
+                self.assertEqual(pending, {})
+                api.tasks.assert_called_once()
+
 class AITests(unittest.TestCase):
+    def setUp(self):
+        close_model_client()
+    def tearDown(self):
+        close_model_client()
     def classify(self, message, result):
+        close_model_client()
         with patch("agent.ollama.Client") as client:
             client.return_value.chat.return_value={"message":{"content":result.model_dump_json()}}
             response=process_request(message)
@@ -318,6 +448,15 @@ class AITests(unittest.TestCase):
     def test_missing_model_entity_uses_recognized_target(self):
         result,_=self.classify('access Tableau',AgentResponse(intent=Intent.ACCESS_REQUEST,message='identified'))
         self.assertEqual(result.application,'tableau')
+
+    def test_model_client_pool_is_reused_and_closed(self):
+        with patch('agent.ollama.Client') as client:
+            first = get_model_client()
+            self.assertIs(first, get_model_client())
+            client.assert_called_once()
+            close_model_client()
+            first.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 """Ollama classifies only a constrained, credential-free representation."""
 import re
+from threading import Lock
 import ollama
 import config
 from schema import AgentResponse, Intent
@@ -9,6 +10,27 @@ from app.catalog import SOFTWARE, APPLICATIONS
 
 class UnsafeRequest(ValueError):
     pass
+
+_model_client = None
+_model_client_lock = Lock()
+
+def get_model_client():
+    """Reuse the HTTP connection pool across model requests."""
+    global _model_client
+    with _model_client_lock:
+        if _model_client is None:
+            _model_client = ollama.Client(host=config.OLLAMA_HOST, timeout=config.OLLAMA_TIMEOUT)
+        return _model_client
+
+def close_model_client():
+    global _model_client
+    with _model_client_lock:
+        if _model_client is not None:
+            # Older supported Ollama clients do not expose close().
+            close = getattr(_model_client, 'close', None)
+            if close:
+                close()
+            _model_client = None
 
 def safe_message(text: str) -> str:
     # Do not send raw free text to any model. Preserve only known workflow tokens.
@@ -63,7 +85,7 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
     if not user_message.strip():
         return AgentResponse(intent=Intent.CHAT, message="Please describe your IT request.")
     try:
-        client = ollama.Client(host=config.OLLAMA_HOST, timeout=config.OLLAMA_TIMEOUT)
+        client = get_model_client()
         response = client.chat(model=config.OLLAMA_MODEL,
             messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": safe}],
             format=AgentResponse.model_json_schema(), think=False,

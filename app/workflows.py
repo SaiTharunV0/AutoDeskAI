@@ -1,6 +1,7 @@
 from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from app.models import (HelpdeskRequest, SoftwareTask, AccessRequest, AuditLog, Device,
                         SoftwarePolicy, ApplicationPolicy, now)
 from app.catalog import SOFTWARE, APPLICATIONS, software_key
@@ -21,15 +22,16 @@ def owned_request(db, request_id, user):
 
 def expire_tasks(db):
     cutoff = now() - timedelta(seconds=config.TASK_TIMEOUT_SECONDS)
-    tasks = db.scalars(select(SoftwareTask).where(
+    tasks = db.scalars(select(SoftwareTask).options(selectinload(SoftwareTask.request)).where(
         SoftwareTask.status.in_(["PENDING", "PROCESSING"]), SoftwareTask.created_at < cutoff
-    ).with_for_update()).all()
+    ).with_for_update(skip_locked=True)).all()
     for task in tasks:
         task.status = task.request.status = "FAILED"
         task.result = task.request.message = "Endpoint task timed out; completion was not confirmed."
         task.completed_at = now()
         audit(db, task.request.user_id, "SOFTWARE_INSTALL_FAILED", "request", task.request_id, "FAILED", "Task timeout")
-    db.commit()
+    if tasks:
+        db.commit()
 
 def correct_legacy_password_requests(db):
     rows = db.scalars(select(HelpdeskRequest).where(
@@ -73,6 +75,9 @@ def create_workflow(db, user, payload):
         if prior.user_id != user.id or prior.status != "NEEDS_CLARIFICATION":
             raise HTTPException(409, "Previous request is not awaiting clarification")
         previous = AgentResponse(intent=Intent.CLARIFICATION, message=prior.message)
+    # All work so far is read-only. Return the pooled connection while the model
+    # runs; a slow model call should not monopolize a PostgreSQL connection.
+    db.commit()
     try:
         result = process_request(payload.message, previous)
     except RuntimeError:
@@ -140,5 +145,4 @@ def create_workflow(db, user, payload):
         request.message = "I can help with password change/reset, approved software installation, and application access."
         audit(db, user.id, "CHAT", "request", request.id, request.status)
     db.commit()
-    db.refresh(request)
     return request

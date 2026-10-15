@@ -6,17 +6,18 @@ from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text
+from fastapi.middleware.gzip import GZipMiddleware
+from sqlalchemy import select, text, or_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from sqlalchemy.orm import Session
-from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profile
+from sqlalchemy.orm import Session, selectinload
+from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profile, upgrade_query_indexes
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS
 from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
-from agent import UnsafeRequest
+from agent import UnsafeRequest, close_model_client
 import config
 
 @asynccontextmanager
@@ -24,6 +25,7 @@ async def lifespan(app):
     validate_config()
     Base.metadata.create_all(engine)
     upgrade_user_profile()
+    upgrade_query_indexes()
     with SessionLocal() as db:
         correct_legacy_password_requests(db)
         for key in SOFTWARE:
@@ -33,10 +35,15 @@ async def lifespan(app):
             if not db.get(ApplicationPolicy, key):
                 db.add(ApplicationPolicy(key=key))
         db.commit()
-    yield
+    try:
+        yield
+    finally:
+        close_model_client()
+        engine.dispose()
 
 app = FastAPI(title="AutoDeskAI", version="1.0.0", lifespan=lifespan,
     description="Authenticated IT workflows. Password actions use Microsoft-hosted experiences; completion is not verified here.")
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
@@ -66,9 +73,11 @@ def database_test(db: Session = Depends(get_db), user=Depends(require_admin)):
     return {"status": "success"}
 
 def create_registered_user(payload: Register, db: Session):
-    if db.scalar(select(User.id).where(User.email == payload.email)):
+    duplicates = db.execute(select(User.email, User.username).where(or_(
+        User.email == payload.email, User.username == payload.username))).all()
+    if any(row.email == payload.email for row in duplicates):
         raise HTTPException(409, 'Email already registered')
-    if db.scalar(select(User.id).where(User.username == payload.username)):
+    if any(row.username == payload.username for row in duplicates):
         raise HTTPException(409, 'Username already taken')
     user = User(name=f'{payload.first_name} {payload.last_name}', first_name=payload.first_name,
                 last_name=payload.last_name, date_of_birth=payload.date_of_birth,
@@ -182,13 +191,14 @@ def new_request(payload: RequestIn, user=Depends(get_current_user), db: Session 
 @app.get("/requests", response_model=list[RequestOut], tags=["Requests"])
 def own_requests(user=Depends(get_current_user), db: Session = Depends(get_db)):
     expire_tasks(db)
-    return db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.user_id == user.id)
+    return db.scalars(select(HelpdeskRequest).options(selectinload(HelpdeskRequest.task)).where(HelpdeskRequest.user_id == user.id)
                       .order_by(HelpdeskRequest.id.desc()).limit(200)).all()
 
 @app.get("/admin/requests", response_model=list[RequestOut], tags=["Admin"])
 def all_requests(user=Depends(require_admin), db: Session = Depends(get_db)):
     expire_tasks(db)
-    return db.scalars(select(HelpdeskRequest).order_by(HelpdeskRequest.id.desc()).limit(500)).all()
+    return db.scalars(select(HelpdeskRequest).options(selectinload(HelpdeskRequest.task))
+                      .order_by(HelpdeskRequest.id.desc()).limit(500)).all()
 
 @app.get("/requests/{request_id}", response_model=RequestOut, tags=["Requests"])
 def request_detail(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
@@ -266,11 +276,13 @@ def heartbeat(device=Depends(current_device), db: Session = Depends(get_db)):
 def tasks(device=Depends(current_device), db: Session = Depends(get_db)):
     expire_tasks(db)
     device.last_seen = now()
-    rows = db.scalars(select(SoftwareTask).where(SoftwareTask.device_id == device.id,
+    rows = db.scalars(select(SoftwareTask).options(selectinload(SoftwareTask.request)).where(SoftwareTask.device_id == device.id,
         SoftwareTask.status == "PENDING").with_for_update(skip_locked=True).limit(10)).all()
+    policies = {policy.key: policy for policy in db.scalars(select(SoftwarePolicy).where(
+        SoftwarePolicy.key.in_({task.software for task in rows})))} if rows else {}
     dispatched = []
     for task in rows:
-        policy = db.get(SoftwarePolicy, task.software)
+        policy = policies.get(task.software)
         if not policy or not policy.enabled or task.software not in SOFTWARE:
             task.status = task.request.status = "REJECTED"
             task.result = task.request.message = "Software approval was revoked before dispatch."

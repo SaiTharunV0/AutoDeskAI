@@ -114,3 +114,51 @@ test('settled requests stop polling until a new request triggers refresh', async
   assert.equal(calls, 3);
   poll.stop();
 });
+
+test('failed reads back off and return to the normal interval after recovery', async () => {
+  const clock = new Clock(), visibility = new Visibility();
+  let calls = 0, errors = 0;
+  const poll = startPolling([{name: 'requests', interval: 15000, load: async () => {
+    calls++; if (calls < 3) throw new Error('Service unavailable');
+  }}], {visibility, now: clock.now, setTimer: clock.set, clearTimer: clock.clear, onError: () => errors++});
+  await clock.advance(0);
+  await clock.advance(15000);
+  assert.equal(calls, 1);
+  await clock.advance(15000);
+  assert.equal(calls, 2);
+  await clock.advance(60000);
+  assert.equal(calls, 3);
+  await clock.advance(15000);
+  assert.equal(calls, 4);
+  assert.equal(errors, 2);
+  poll.stop();
+});
+
+test('queued mutation refresh waits until the tab becomes visible', async () => {
+  const clock = new Clock(), visibility = new Visibility();
+  let calls = 0, finish;
+  const poll = startPolling([{name: 'requests', interval: 15000, load: () => {
+    calls++; return calls === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve();
+  }}], {visibility, now: clock.now, setTimer: clock.set, clearTimer: clock.clear});
+  await clock.advance(0);
+  const refreshed = poll.refresh('requests');
+  visibility.setHidden(true);
+  finish();
+  await refreshed;
+  assert.equal(calls, 1);
+  visibility.setHidden(false);
+  await clock.advance(0);
+  assert.equal(calls, 2);
+  poll.stop();
+});
+
+test('stopping before the load microtask avoids starting a request', async () => {
+  const clock = new Clock(), visibility = new Visibility();
+  let calls = 0;
+  const poll = startPolling([{name: 'requests', interval: 15000, load: async () => { calls++; }}],
+    {visibility, now: clock.now, setTimer: clock.set, clearTimer: clock.clear});
+  const pending = poll.refresh('requests');
+  poll.stop();
+  await pending;
+  assert.equal(calls, 0);
+});

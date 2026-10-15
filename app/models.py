@@ -1,5 +1,5 @@
 from datetime import date, datetime, timezone
-from sqlalchemy import String, ForeignKey, UniqueConstraint
+from sqlalchemy import String, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -22,6 +22,8 @@ class User(Base):
 
 class Device(Base):
     __tablename__ = "devices"
+    __table_args__ = (Index("ix_devices_owner", "owner_user_id"),
+                      Index("ix_devices_token", "token_hash"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     device_id: Mapped[str] = mapped_column(String(100), unique=True)
     hostname: Mapped[str] = mapped_column(String(100))
@@ -34,7 +36,8 @@ class Device(Base):
 
 class HelpdeskRequest(Base):
     __tablename__ = "helpdesk_requests"
-    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),
+                      Index("ix_requests_user_id", "user_id", "id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     intent: Mapped[str] = mapped_column(String(30))
@@ -50,6 +53,8 @@ class HelpdeskRequest(Base):
 
 class SoftwareTask(Base):
     __tablename__ = "software_tasks"
+    __table_args__ = (Index("ix_tasks_status_created", "status", "created_at"),
+                      Index("ix_tasks_device_status", "device_id", "status"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     request_id: Mapped[int] = mapped_column(ForeignKey("helpdesk_requests.id"), unique=True)
     device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
@@ -75,6 +80,7 @@ class AccessRequest(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (Index("ix_audit_resource", "resource_type", "resource_id", "id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String(80))

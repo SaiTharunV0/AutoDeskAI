@@ -13,7 +13,12 @@ def run_once(api, device_id, simulation=True, pending=None):
         raise ValueError("Configured device does not match authenticated device")
     # Retry results before claiming more work. Backend result handling is idempotent.
     for task_id, result in list(pending.items()):
-        api.report(task_id, result)
+        try:
+            api.report(task_id, result)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code not in (404, 409):
+                raise
+            # A timed-out/deleted/finalized task must not block all future work.
         del pending[task_id]
     for task in api.tasks():
         if task["device_id"] != device["id"] or task["status"] != "PROCESSING":
@@ -33,18 +38,21 @@ def main():
     config.validate()
     api = AgentAPI(config.SERVER_URL, config.AGENT_TOKEN)
     pending = {}
+    failures = 0
     try:
         while True:
             try:
                 run_once(api, config.DEVICE_ID, config.SIMULATION, pending)
+                failures = 0
                 print("Heartbeat and task cycle completed.")
             except (httpx.HTTPError, ValueError):
+                failures = min(failures + 1, 6)
                 print("Agent cycle failed; check connectivity, device configuration, and backend status.")
                 if args.once:
                     raise SystemExit(1) from None
             if args.once:
                 break
-            time.sleep(5)
+            time.sleep(min(config.POLL_SECONDS * 2 ** failures, 60))
     finally:
         api.close()
 
