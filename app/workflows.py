@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 from app.models import (HelpdeskRequest, SoftwareTask, AccessRequest, AuditLog, Device,
                         SoftwarePolicy, ApplicationPolicy, now)
 from app.catalog import SOFTWARE, APPLICATIONS, software_key
+from app.schemas import ChatOut
 from schema import AgentResponse, Intent
 from agent import process_request, safe_message, UnsafeRequest
 import config
@@ -84,6 +85,8 @@ def create_workflow(db, user, payload):
         audit(db, user.id, "AI_REQUEST_FAILED", "service", None, "FAILED", "AI unavailable or malformed output")
         db.commit()
         raise
+    if result.intent == Intent.CHAT:
+        return ChatOut(message="I can help with password change or reset, approved software installation, and application access.")
     request = HelpdeskRequest(user_id=user.id, intent=result.intent.value,
                               original_message=safe[:200], idempotency_key=payload.idempotency_key)
     db.add(request)
@@ -140,9 +143,5 @@ def create_workflow(db, user, payload):
         request.status = "REJECTED"
         request.message = "This request is not supported."
         audit(db, user.id, "UNSUPPORTED_REQUEST", "request", request.id, request.status)
-    else:
-        request.status = "COMPLETED"
-        request.message = "I can help with password change/reset, approved software installation, and application access."
-        audit(db, user.id, "CHAT", "request", request.id, request.status)
     db.commit()
     return request

@@ -204,6 +204,18 @@ class WorkflowTests(unittest.TestCase):
             second=self.client.post("/requests",headers=self.headers(),json=body).json()
             self.assertEqual(first["id"],second["id"])
             self.assertEqual(ai.call_count,1)
+
+    def test_general_chat_does_not_create_request(self):
+        before = len(self.client.get('/requests', headers=self.headers()).json())
+        for message in ('hello', 'how are you', 'Tableau'):
+            response = self.client.post('/requests', headers=self.headers(), json={
+                'message': message, 'idempotency_key': secrets.token_hex(16)})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['intent'], 'CHAT')
+            self.assertIsNone(response.json()['id'])
+        self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), before)
+        with self.sessions() as db:
+            self.assertEqual(db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.user_id == self.employee['user']['id'])), None)
     def test_timeout(self):
         from datetime import timedelta
         device=self.enroll()
@@ -338,7 +350,7 @@ class WorkflowTests(unittest.TestCase):
             with patch('app.workflows.process_request', side_effect=classify):
                 response = self.client.post('/requests', headers=self.headers(), json={
                     'message': 'hello', 'idempotency_key': 'connection-release-test'})
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 200)
         finally:
             event.remove(self.engine, 'checkout', checkout)
             event.remove(self.engine, 'checkin', checkin)
@@ -421,18 +433,19 @@ class AITests(unittest.TestCase):
             result,_=self.classify(message,AgentResponse(intent=intent,message="test",**field))
             self.assertEqual(result.intent,Intent.CLARIFICATION if message=="install" else intent)
     def test_ambiguous_request(self):
-        result,_=self.classify("Tableau",AgentResponse(intent=Intent.ACCESS_REQUEST,application="tableau",message="test"))
-        self.assertEqual(result.intent,Intent.CLARIFICATION)
+        result,client=self.classify("Tableau",AgentResponse(intent=Intent.ACCESS_REQUEST,application="tableau",message="test"))
+        self.assertEqual(result.intent,Intent.CHAT)
+        client.assert_not_called()
     def test_no_raw_text_sent(self):
         marker=secrets.token_hex(20)
-        _,client=self.classify("hello "+marker,AgentResponse(intent=Intent.CHAT,message="hi"))
+        _,client=self.classify("install "+marker,AgentResponse(intent=Intent.CHAT,message="hi"))
         self.assertNotIn(marker,str(client.return_value.chat.call_args))
     def test_bad_response_and_offline(self):
         with patch("agent.ollama.Client") as client:
             client.return_value.chat.return_value={"message":{"content":"invalid JSON"}}
-            with self.assertRaises(RuntimeError): process_request("hello")
+            with self.assertRaises(RuntimeError): process_request("change password")
             client.return_value.chat.side_effect=ConnectionError()
-            with self.assertRaises(RuntimeError): process_request("hello")
+            with self.assertRaises(RuntimeError): process_request("change password")
     def test_followup(self):
         result=process_request("Tableau",AgentResponse(intent=Intent.CLARIFICATION,message="Which application?"))
         self.assertEqual(result.application,"tableau")

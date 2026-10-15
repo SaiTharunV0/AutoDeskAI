@@ -109,6 +109,12 @@ class RequestOut(BaseModel):
     updated_at: datetime
     task: TaskOut | None
 
+class ChatOut(BaseModel):
+    id: None = None
+    intent: Literal["CHAT"] = "CHAT"
+    status: Literal["CHAT"] = "CHAT"
+    message: str
+
 class DeviceIn(Input):
     device_id: str = Field(min_length=3, max_length=100, pattern=r"^[a-zA-Z0-9_.-]+$")
     hostname: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.-]+$")

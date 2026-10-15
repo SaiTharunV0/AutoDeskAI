@@ -65,9 +65,9 @@ def _resolve_pending_clarification(user_message, previous_response=None):
     if previous_response is None or previous_response.intent != Intent.CLARIFICATION:
         return None
     text = previous_response.message.lower()
-    if "which application" in text:
+    if "which application" in text and "tableau" in user_message.split():
         return AgentResponse(intent=Intent.ACCESS_REQUEST, application=user_message.strip(), message="Access request identified.")
-    if "which software" in text:
+    if "which software" in text and "vscode" in user_message.split():
         return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=user_message.strip(), message="Installation request identified.")
     return None
 
@@ -84,6 +84,10 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
         return validate_agent_response(pending)
     if not user_message.strip():
         return AgentResponse(intent=Intent.CHAT, message="Please describe your IT request.")
+    # A greeting or general conversation has no supported service action to track.
+    if not words & {"password", "install", "installed", "setup", "download",
+                    "access", "permission", "grant"}:
+        return AgentResponse(intent=Intent.CHAT, message="I can help with password change or reset, approved software installation, and application access.")
     try:
         client = get_model_client()
         response = client.chat(model=config.OLLAMA_MODEL,

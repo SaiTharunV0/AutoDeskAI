@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import timedelta
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
@@ -175,11 +175,14 @@ def delete_user(user_id: int, user=Depends(require_admin), db: Session = Depends
         raise HTTPException(409, 'Account has retained history') from None
     return {'status': 'success'}
 
-@app.post("/requests", response_model=RequestOut, status_code=201, tags=["Requests"])
-@app.post("/ai/request", response_model=RequestOut, status_code=201, tags=["Requests"])
-def new_request(payload: RequestIn, user=Depends(get_current_user), db: Session = Depends(get_db)):
+@app.post("/requests", response_model=RequestOut | ChatOut, status_code=201, tags=["Requests"])
+@app.post("/ai/request", response_model=RequestOut | ChatOut, status_code=201, tags=["Requests"])
+def new_request(payload: RequestIn, response: Response, user=Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        return create_workflow(db, user, payload)
+        result = create_workflow(db, user, payload)
+        if isinstance(result, ChatOut):
+            response.status_code = 200
+        return result
     except IntegrityError:
         db.rollback()
         existing = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.user_id == user.id,
