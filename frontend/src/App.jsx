@@ -88,11 +88,6 @@ function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole}){
    <div className="authHeroInner">
     <Brand/>
     <div className="authHeroCopy"><span className="authEyebrow">A CLEARER WAY TO GET SUPPORT</span><h1>IT help that keeps your day moving.</h1><p>Ask for help, follow your requests, and see what happens next in one calm workspace.</p></div>
-    <div className="authPreview" aria-label="Example helpdesk workflow">
-     <div className="authPreviewTop"><span>EXAMPLE WORKFLOW</span><span className="previewPulse">Guided</span></div>
-     <div className="authPreviewBody"><span className="previewIcon"><KeyRound size={21}/></span><div><b>Password help</b><small>Continue securely with Microsoft</small></div><CheckCircle2 size={21}/></div>
-     <div className="authPreviewFoot"><span>Request created</span><i/><span>Next step ready</span></div>
-    </div>
     <div className="heroPoints"><span><ShieldCheck size={18}/>Protected actions</span><span><Activity size={18}/>Visible progress</span><span><Bot size={18}/>Guided requests</span></div>
    </div>
   </section>
