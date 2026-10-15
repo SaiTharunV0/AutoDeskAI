@@ -15,6 +15,8 @@ class Login(Input):
         return value.strip().lower()
 
 class Register(Input):
+    account_role: Literal['employee', 'admin'] = 'employee'
+    admin_invite_code: SecretStr | None = Field(default=None, max_length=256)
     first_name: str = Field(min_length=1, max_length=50)
     last_name: str = Field(min_length=1, max_length=50)
     date_of_birth: date

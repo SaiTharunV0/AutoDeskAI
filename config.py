@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / '.env', override=False)
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql+psycopg://localhost/autodeskaidb')
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', '')
+ADMIN_REGISTRATION_CODE = os.getenv('ADMIN_REGISTRATION_CODE', '')
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
 JWT_EXPIRE_MINUTES = int(os.getenv('JWT_EXPIRE_MINUTES', '60'))
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434')

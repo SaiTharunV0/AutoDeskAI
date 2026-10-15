@@ -11,6 +11,8 @@ services:
         sync: false
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: ADMIN_REGISTRATION_CODE
+        sync: false
       - key: OLLAMA_HOST
         value: https://ollama.com
       - key: OLLAMA_MODEL

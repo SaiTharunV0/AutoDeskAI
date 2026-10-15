@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import hashlib
+import hmac
 import secrets
 from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request
@@ -64,8 +65,7 @@ def database_test(db: Session = Depends(get_db), user=Depends(require_admin)):
     db.execute(text("SELECT 1"))
     return {"status": "success"}
 
-@app.post("/auth/register", response_model=UserOut, status_code=201, tags=["Authentication"])
-def register(payload: Register, db: Session = Depends(get_db)):
+def create_registered_user(payload: Register, db: Session):
     if db.scalar(select(User.id).where(User.email == payload.email)):
         raise HTTPException(409, 'Email already registered')
     if db.scalar(select(User.id).where(User.username == payload.username)):
@@ -73,16 +73,29 @@ def register(payload: Register, db: Session = Depends(get_db)):
     user = User(name=f'{payload.first_name} {payload.last_name}', first_name=payload.first_name,
                 last_name=payload.last_name, date_of_birth=payload.date_of_birth,
                 username=payload.username, email=payload.email,
-                password_hash=hash_password(payload.password.get_secret_value()), role="employee")
+                password_hash=hash_password(payload.password.get_secret_value()), role=payload.account_role)
     db.add(user)
     try:
         db.flush()
-        audit(db, user.id, "USER_REGISTERED", "user", user.id, "COMPLETED")
-        db.commit()
+        audit(db, user.id, "ADMIN_REGISTERED" if payload.account_role == "admin" else "USER_REGISTERED",
+              "user", user.id, "COMPLETED")
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, 'Email or username already registered') from None
     return user
+
+@app.post("/auth/register", response_model=TokenOut, status_code=201, tags=["Authentication"])
+def register(payload: Register, db: Session = Depends(get_db)):
+    if payload.account_role == "admin":
+        invite = payload.admin_invite_code.get_secret_value() if payload.admin_invite_code else ""
+        if not config.ADMIN_REGISTRATION_CODE:
+            raise HTTPException(503, "Administrator registration is not configured.")
+        if not hmac.compare_digest(invite.encode("utf-8"), config.ADMIN_REGISTRATION_CODE.encode("utf-8")):
+            raise HTTPException(403, "Administrator invite code is invalid.")
+    user = create_registered_user(payload, db)
+    audit(db, user.id, "LOGIN_SUCCESS", "user", user.id, "COMPLETED")
+    db.commit()
+    return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
 
 @app.post("/auth/login", response_model=TokenOut, tags=["Authentication"])
 def login(payload: Login, db: Session = Depends(get_db)):
@@ -117,7 +130,9 @@ def users(user=Depends(require_admin), db: Session = Depends(get_db)):
 @app.post('/users', response_model=UserOut, status_code=201, tags=['Admin'],
           description='Legacy user creation route, now administrator-only and requires a password.')
 def admin_create_user(payload: Register, user=Depends(require_admin), db: Session = Depends(get_db)):
-    return register(payload, db)
+    created = create_registered_user(payload, db)
+    db.commit()
+    return created
 
 @app.put('/users/{user_id}', response_model=UserOut, tags=['Admin'])
 def update_user(user_id: int, payload: UserUpdate, user=Depends(require_admin), db: Session = Depends(get_db)):
