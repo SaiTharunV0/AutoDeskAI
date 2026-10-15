@@ -8,6 +8,7 @@ class Input(BaseModel):
 class Login(Input):
     identifier: str = Field(min_length=1, max_length=150, validation_alias=AliasChoices('identifier', 'email'))
     password: SecretStr = Field(min_length=1, max_length=256)
+    expected_role: Literal['employee', 'admin'] | None = None
     @field_validator("identifier")
     @classmethod
     def normalize_identifier(cls, value):

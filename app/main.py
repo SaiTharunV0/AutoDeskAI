@@ -94,6 +94,11 @@ def login(payload: Login, db: Session = Depends(get_db)):
         audit(db, user.id if user else None, "LOGIN_FAILED", "user", user.id if user else None, "FAILED")
         db.commit()
         raise HTTPException(401, 'Username/email or password is wrong')
+    if payload.expected_role and user.role != payload.expected_role:
+        audit(db, user.id, "LOGIN_PORTAL_MISMATCH", "user", user.id, "FAILED",
+              "Account used the wrong sign-in portal")
+        db.commit()
+        raise HTTPException(403, 'This account cannot sign in through the selected portal.')
     audit(db, user.id, "LOGIN_SUCCESS", "user", user.id, "COMPLETED")
     db.commit()
     return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
