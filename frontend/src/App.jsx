@@ -76,7 +76,7 @@ export default function App(){
  {user.role==='admin'&&active==='Admin Panel'&&<Admin data={admin} catalog={catalog} enrollment={enrollment} setEnrollment={setEnrollment} act={act} busy={busy} api={api} refresh={refreshAdmin}/>} {user.role==='admin'&&active==='Audit Logs'&&<Audit rows={admin.audit}/>}</section></main>{modal&&<RequestModal row={modal} close={()=>setModal(null)} api={api}/>}</div>
 }
 
-function Brand(){return <div className="brand"><div className="brandIcon"><img src="/logo.png" alt=""/></div><div><b>AutoDeskAI</b><small>AI Powered IT Helpdesk</small></div></div>}
+function Brand(){return <div className="brand"><div className="brandIcon"><img src="/logo.png?v=2" alt=""/></div><div><b>AutoDeskAI</b><small>AI Powered IT Helpdesk</small></div></div>}
 function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole}){
  const isManager=authRole==='admin';
  const [showRecovery,setShowRecovery]=useState(false),[showPassword,setShowPassword]=useState(false);
