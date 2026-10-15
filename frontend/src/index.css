@@ -211,11 +211,7 @@ input::placeholder { color: #8498ad; }
 .dashboardHero .eyebrow { color: #b8ddff; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .dashboardHero h1 { margin: 8px 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.15; }
 .dashboardHero p { margin: 0; color: #dfedff; line-height: 1.5; }
-.heroActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
-.heroActions button { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
-.heroActions .primary { background: #fff; color: #11549a; }
 .secondary { border: 1px solid #afd3ff; border-radius: 8px; background: #ffffff17; color: #fff; padding: 10px 16px; font-weight: 700; }
-.heroActions button:hover { filter: brightness(1.06); transform: translateY(-1px); }
 .heroDate { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 10px 12px; border-radius: 10px; background: #ffffff1c; color: #e8f3ff; font-size: 12px; }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .stat {
@@ -233,7 +229,6 @@ input::placeholder { color: #8498ad; }
 .stat span { font-size: 12px; font-weight: 700; color: #58728c; }
 .stat b { font-size: 30px; line-height: 1; color: #173657; }
 .stat small { font-size: 11px; color: #7d90a7; line-height: 1.4; }
-.grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .8fr); gap: 18px; margin-top: 20px; align-items: start; }
 .card { min-width: 0; background: #fff; border: 1px solid #e3edf7; border-radius: 18px; padding: 18px; box-shadow: 0 5px 18px rgba(21, 69, 120, .035); }
 .assistant.full { max-width: 950px; margin: 0 auto; }
 .cardHead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -288,21 +283,11 @@ input::placeholder { color: #8498ad; }
   display: grid; place-items: center;
 }
 .send:hover:not(:disabled) { background: #0e62d2; }
-.right { display: flex; flex-direction: column; gap: 18px; }
 .sectionHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .sectionHead h2 { margin: 0; font-size: 17px; }
 .sectionHead p { margin: 4px 0 0; font-size: 12px; color: #7188a0; }
 .sectionHead > button { flex: 0 0 auto; border: 0; background: transparent; color: #1769c0; font-size: 12px; font-weight: 700; }
-.quickGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.quickGrid button {
-  background: #f8fbff; border: 1px solid #e5eefb; border-radius: 12px; padding: 12px;
-  display: flex; align-items: flex-start; gap: 10px; text-align: left; min-width: 0;
-}
-.quickGrid button:hover, .request:hover { border-color: #9ec7f7; background: #f0f7ff; }
-.qicon { flex: 0 0 32px; width: 32px; height: 32px; border-radius: 10px; background: #eaf3ff; color: #1976ed; display: grid; place-items: center; }
-.quickGrid b, .quickGrid small { display: block; }
-.quickGrid small { color: #6b809b; margin-top: 4px; line-height: 1.35; }
-.recent .request { width: 100%; margin-top: 8px; text-align: left; }
+.request:hover { border-color: #9ec7f7; background: #f0f7ff; }
 .request {
   display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 10px;
   border: 1px solid #e4edf8; background: #f9fbff; border-radius: 12px; padding: 12px;
@@ -316,11 +301,6 @@ input::placeholder { color: #8498ad; }
 .request .status { margin-top: 5px; }
 .listSummary { margin: 4px 0 14px; color: #617c96; font-size: 12px; font-weight: 700; }
 .requestList { display: grid; gap: 12px; }
-.infoRow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
-.infoRow > div { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; row-gap: 3px; padding: 14px; border: 1px solid #e2ebf5; border-radius: 12px; background: #fff; }
-.infoRow svg { width: 19px; height: 19px; grid-row: span 2; color: #1976ed; }
-.infoRow b { font-size: 12px; }
-.infoRow span { font-size: 11px; color: #70869c; line-height: 1.4; }
 .requestArticle {
   background: #fff; border: 1px solid #e5edf8; border-radius: 12px; padding: 12px;
   display: flex; flex-direction: column; gap: 12px; box-shadow: 0 3px 12px rgba(21, 69, 120, .03);
@@ -341,11 +321,6 @@ input::placeholder { color: #8498ad; }
 .pageTitle h1 { margin: 0; font-size: clamp(24px, 2.5vw, 30px); color: #173657; }
 .pageTitle p { margin: 6px 0 0; color: #627b95; line-height: 1.5; }
 .pageTitle > svg { flex: 0 0 auto; width: 42px; height: 42px; padding: 9px; border-radius: 12px; background: #edf5ff; color: #1976ed; }
-.workflow { display: flex; flex-direction: column; gap: 12px; }
-.workflowBody { max-width: 560px; display: grid; gap: 10px; }
-.workflow label { margin: 0; }
-.workflow .primary { width: fit-content; margin-top: 6px; }
-.fieldHelp { margin: 0; color: #6a7890; font-size: 12px; line-height: 1.5; }
 .knowledge { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .knowledge article {
   background: #f8fbff; border: 1px solid #e4eefb; border-radius: 16px; padding: 16px;
@@ -380,7 +355,6 @@ input::placeholder { color: #8498ad; }
 .status.failed, .status.rejected, .status.disabled { background: #ffe4e4; color: #a92d2d; }
 .status.active { background: #e0f2fe; color: #0a6682; }
 .adminGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-.adminGrid .wide { grid-column: 1 / -1; }
 .adminGrid .pageCard > h2 { margin: 20px 0 10px; font-size: 17px; }
 .adminGrid .pageCard > h2:first-child { margin-top: 0; }
 .policy {
@@ -440,16 +414,6 @@ input::placeholder { color: #8498ad; }
   padding: 24px; border: 1px dashed #d5e5f5; border-radius: 12px; color: #607b96;
   background: #f8fbff; text-align: center; line-height: 1.5;
 }
-.adminSummary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
-.summaryCard { padding: 14px; background: #f6faff; border: 1px solid #dfeaf7; border-radius: 12px; }
-.summaryCard span { display: block; color: #607b96; font-size: 12px; margin-bottom: 6px; }
-.summaryCard strong { font-size: 24px; color: #173657; }
-.ticketFilters { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
-.ticketFilter {
-  border: 1px solid #d9e4f4; background: #fff; color: #355680; border-radius: 999px;
-  padding: 8px 12px; font-weight: 700;
-}
-.ticketFilter.active { background: #1976ed; border-color: #1976ed; color: #fff; }
 .ticketTable { display: flex; flex-direction: column; gap: 8px; }
 .ticketHead, .ticketRow {
   display: grid; grid-template-columns: 70px 1.2fr 1fr 2.4fr 1fr 1fr; gap: 12px; align-items: center;
@@ -557,13 +521,12 @@ input::placeholder { color: #8498ad; }
 .enrollCard .sectionHead h2 { margin: 0; color: #173657; font-size: 19px; }
 .enrollCard .sectionHead p { margin: 5px 0 0; color: #6b8198; font-size: 12px; }
 @media (max-width: 1100px) {
-  .grid, .adminGrid { grid-template-columns: 1fr; }
+  .adminGrid { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .managerStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .endpointGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .managerColumns { grid-template-columns: 1fr; }
-  .adminGrid .wide { grid-column: auto; }
-  .infoRow, .knowledge { grid-template-columns: 1fr; }
+  .knowledge { grid-template-columns: 1fr; }
   .authHero h1 { font-size: 38px; }
   .dashboardHero { align-items: flex-start; }
 }
@@ -597,7 +560,6 @@ input::placeholder { color: #8498ad; }
   .ticketRow span { display: flex; justify-content: space-between; gap: 12px; }
   .ticketRow span::before { content: attr(data-label); font-weight: 700; color: #47627d; }
   .ticketRow .ticketReason { display: block; }
-  .adminSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .policy { flex-wrap: wrap; }
   .policy > span { flex-basis: 100%; }
   .policy select { flex: 1; }
@@ -616,7 +578,6 @@ input::placeholder { color: #8498ad; }
   .formPair { grid-template-columns: 1fr; gap: 0; }
   .stats { gap: 10px; }
   .stat { padding: 14px; }
-  .quickGrid { grid-template-columns: 1fr; }
   .request { grid-template-columns: 30px 1fr; }
   .request time { display: none; }
   .search input { font-size: 11px; }
@@ -633,7 +594,6 @@ input::placeholder { color: #8498ad; }
   .chat { height: 360px; }
   .headRight .bell { display: none; }
   .dashboardHero h1 { font-size: 27px; }
-  .heroActions button { width: 100%; justify-content: center; }
   .stat b { font-size: 25px; }
   .chatIntro { padding: 12px; }
   .bubble { max-width: 90%; }
