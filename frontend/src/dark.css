@@ -31,6 +31,7 @@
 [data-theme="dark"] .topNav,
 [data-theme="dark"] .card,
 [data-theme="dark"] .pageCard,
+[data-theme="dark"] .requestsTableWrap,
 [data-theme="dark"] .stat,
 [data-theme="dark"] .managerMetric,
 [data-theme="dark"] .modal,
@@ -47,6 +48,11 @@
 [data-theme="dark"] .deviceBar label { color: #bbd0c8; }
 [data-theme="dark"] .search { background: #162724; border-color: var(--line); color: var(--muted); }
 [data-theme="dark"] .search input { background: transparent; }
+[data-theme="dark"] .requestsTable { background: #1d302d; color: var(--ink); }
+[data-theme="dark"] .requestsTable th { background: #243b35; color: var(--muted); }
+[data-theme="dark"] .requestsTable td { border-color: var(--line); }
+[data-theme="dark"] .requestsTable tbody tr:hover { background: #243b35; }
+[data-theme="dark"] .requestDescriptionCell { color: var(--ink); }
 [data-theme="dark"] .themeToggle,
 [data-theme="dark"] .bell,
 [data-theme="dark"] .logout,
