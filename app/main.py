@@ -220,14 +220,25 @@ MICROSOFT_PASSWORD_URLS = {
 }
 
 def configured_sspr_url():
-    value = config.MICROSOFT_SSPR_URL.strip()
+    value = config.MICROSOFT_SSPR_URL
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
     try:
         parsed = urlsplit(value)
-        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        if (parsed.scheme != "https" or parsed.hostname != "passwordreset.microsoftonline.com"
+                or parsed.username or parsed.password or parsed.port not in (None, 443)
+                or parsed.fragment):
             raise ValueError
         return value
-    except ValueError:
-        raise HTTPException(503, "Organization password recovery is unavailable. Contact your IT administrator.") from None
+    except (ValueError, TypeError):
+        return None
+
+@app.get("/auth/password-recovery", tags=["Authentication"],
+         description="Public Microsoft Entra SSPR destination for the logged-out recovery screen.")
+def password_recovery_configuration():
+    url = configured_sspr_url()
+    return {"available": bool(url), "url": url}
 
 @app.post("/requests/{request_id}/password/action", response_model=PasswordActionOut, tags=["Requests"],
           description="Return the Microsoft-hosted action for the authenticated owner. Opening it does not prove completion.")
@@ -239,7 +250,10 @@ def password_action(request_id: int, user=Depends(get_current_user), db: Session
         raise HTTPException(409, "Not a password workflow")
     if row.status != "AWAITING_USER_ACTION":
         raise HTTPException(409, "Workflow is not awaiting user action")
-    url = configured_sspr_url() if row.intent == "PASSWORD_RESET" else MICROSOFT_PASSWORD_URLS[row.intent]
+    url = (configured_sspr_url() if row.intent == "PASSWORD_RESET"
+           else MICROSOFT_PASSWORD_URLS[row.intent])
+    if not url:
+        raise HTTPException(503, "Organization password recovery is unavailable. Contact your IT administrator.")
     audit(db, user.id, row.intent + "_LINK_OPENED", "request", row.id, row.status,
           "Microsoft-hosted action issued; completion unverified")
     db.commit()

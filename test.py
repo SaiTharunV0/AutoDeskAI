@@ -125,12 +125,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn(self.password, str(history))
         self.assertNotIn(self.employee["access_token"], str(history))
 
+    def test_public_sspr_configuration_requires_no_login_and_validates_destination(self):
+        with patch.object(main.config, "MICROSOFT_SSPR_URL", "https://passwordreset.microsoftonline.com/"):
+            response = self.client.get("/auth/password-recovery")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"available": True, "url": "https://passwordreset.microsoftonline.com/"})
+        with patch.object(main.config, "MICROSOFT_SSPR_URL", ""):
+            self.assertEqual(self.client.get("/auth/password-recovery").json(), {"available": False, "url": None})
+        with patch.object(main.config, "MICROSOFT_SSPR_URL", "https://evil.example/reset"):
+            self.assertEqual(self.client.get("/auth/password-recovery").json(), {"available": False, "url": None})
+
     def test_password_reset_uses_validated_configuration_without_completion(self):
         row = self.request(Intent.PASSWORD_RESET, "forgot password").json()
-        with patch.object(main.config, "MICROSOFT_SSPR_URL", "https://tenant.example/reset"):
+        with patch.object(main.config, "MICROSOFT_SSPR_URL", "https://passwordreset.microsoftonline.com/?mkt=es-us"):
             response = self.client.post(f'/requests/{row["id"]}/password/action', headers=self.headers())
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["url"], "https://tenant.example/reset")
+            self.assertEqual(response.json()["url"], "https://passwordreset.microsoftonline.com/?mkt=es-us")
         with patch.object(main.config, "MICROSOFT_SSPR_URL", "http://unsafe.example/reset"):
             response = self.client.post(f'/requests/{row["id"]}/password/action', headers=self.headers())
             self.assertEqual(response.status_code, 503)

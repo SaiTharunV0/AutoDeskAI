@@ -22,6 +22,15 @@ test('API distinguishes invalid credentials from expired sessions', async () => 
   await assert.rejects(requestApi('/requests', {fetchImpl, token: 'expired'}), {message: SESSION_ERROR});
 });
 
+test('logged-out recovery configuration request sends no JWT', async () => {
+  const response = await requestApi('/auth/password-recovery', {fetchImpl: async (url, options) => {
+    assert.equal(url, '/api/auth/password-recovery');
+    assert.equal(options.headers.has('Authorization'), false);
+    return new Response(JSON.stringify({available: true, url: 'https://passwordreset.microsoftonline.com/'}), {status: 200});
+  }});
+  assert.equal(response.available, true);
+});
+
 test('timeout covers the response body and is reported clearly', async () => {
   await assert.rejects(requestApi('/requests', {timeoutMs: 5, fetchImpl: async (_, {signal}) => ({
     ok: true, status: 200, text: () => new Promise((resolve, reject) => {

@@ -3,7 +3,7 @@ import{Activity,AlertCircle,Bell,BookOpen,Bot,CheckCircle2,Clock3,Eye,EyeOff,Fil
 import {startPolling} from './polling.js';
 import {requestApi, isConnectionError, SESSION_ERROR} from './api.js';
 import {attachPageGestures} from './gestures.js';
-import {configuredSsprUrl, validatedSsprUrl} from './sspr.js';
+import {validatedSsprUrl} from './sspr.js';
 
 const keepIfEqual=(current,next)=>JSON.stringify(current)===JSON.stringify(next)?current:next;
 const sessionKey='autodeskai.session.token';
@@ -86,8 +86,9 @@ function Brand(){return <div className="brand"><div className="brandIcon"><img s
 function ThemeToggle({theme,setTheme}){return <button className="themeToggle" type="button" onClick={()=>setTheme(theme==='dark'?'light':'dark')} aria-label={`Switch to ${theme==='dark'?'light':'dark'} mode`} title={`Switch to ${theme==='dark'?'light':'dark'} mode`}>{theme==='dark'?<Sun size={19}/>:<Moon size={19}/>}</button>}
 function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole,theme,setTheme}){
  const isManager=authRole==='admin';
- const [showRecovery,setShowRecovery]=useState(false),[showPassword,setShowPassword]=useState(false),[recoveryError,setRecoveryError]=useState('');
- const openSspr=()=>{if(busy)return;const destination=validatedSsprUrl(configuredSsprUrl);if(!destination){setRecoveryError('Organization password recovery is not configured correctly. Contact your IT administrator for help.');return}window.location.assign(destination)};
+ const [showRecovery,setShowRecovery]=useState(false),[showPassword,setShowPassword]=useState(false),[recoveryError,setRecoveryError]=useState(''),[recoveryDestination,setRecoveryDestination]=useState(''),[recoveryLoading,setRecoveryLoading]=useState(false);
+ const openRecovery=async()=>{setShowRecovery(true);setRecoveryError('');setRecoveryDestination('');setRecoveryLoading(true);try{const result=await requestApi('/auth/password-recovery');const destination=result?.available?validatedSsprUrl(result.url):null;if(!destination){setRecoveryError('Organization password recovery is not configured correctly. Contact your IT administrator for help.');return}setRecoveryDestination(destination)}catch{setRecoveryError('Unable to load organization password recovery settings. Please try again.')}finally{setRecoveryLoading(false)}};
+ const openSspr=()=>{if(busy||recoveryLoading||!recoveryDestination)return;const destination=validatedSsprUrl(recoveryDestination);if(!destination){setRecoveryDestination('');setRecoveryError('Organization password recovery is not configured correctly. Contact your IT administrator for help.');return}window.location.assign(destination)};
  const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);
  const latestBirthDate=`${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
  const changeMode=next=>{setMode(next);setShowRecovery(false)};
@@ -106,7 +107,7 @@ function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole,theme,setThem
     <button type="button" disabled={busy} className={authRole==='employee'?'authTab active':'authTab'} aria-pressed={authRole==='employee'} onClick={()=>{setAuthRole('employee');setShowRecovery(false)}}><UserCircle2 size={19}/><span><b>Employee</b><small>Get IT support</small></span></button>
     <button type="button" disabled={busy} className={authRole==='admin'?'authTab active':'authTab'} aria-pressed={authRole==='admin'} onClick={()=>{setAuthRole('admin');setShowRecovery(false)}}><ShieldCheck size={19}/><span><b>Administrator</b><small>Manage the desk</small></span></button>
    </div>
-   {showRecovery?<div className="recoveryNotice"><span className="authEyebrow">ACCOUNT HELP</span><h2>Forgot organization password?</h2><p>Continue to Microsoft to verify your identity and reset your work or school password. AutoDeskAI never receives your organization password.</p>{recoveryError&&<p className="error" role="alert">{recoveryError}</p>}<p>If Microsoft says self-service recovery is unavailable, contact your organization's IT administrator.</p><button type="button" className="primary" disabled={busy} onClick={openSspr}>Continue to Microsoft password reset</button><button type="button" className="authRecoveryLink" onClick={()=>{setRecoveryError('');setShowRecovery(false)}}>Back to sign in</button></div>:<>
+   {showRecovery?<div className="recoveryNotice"><span className="authEyebrow">ACCOUNT HELP</span><h2>Forgot organization password?</h2><p>Continue to Microsoft to verify your identity and reset your work or school password. AutoDeskAI never receives your organization password.</p>{recoveryLoading&&<p role="status">Checking recovery configuration…</p>}{recoveryError&&<p className="error" role="alert">{recoveryError}</p>}<p>If Microsoft says self-service recovery is unavailable, contact your organization's IT administrator.</p><button type="button" className="primary" disabled={busy||recoveryLoading||!recoveryDestination} onClick={openSspr}>Continue to Microsoft password reset</button><button type="button" className="authRecoveryLink" onClick={()=>{setRecoveryError('');setRecoveryDestination('');setShowRecovery(false)}}>Back to sign in</button></div>:<>
     <div className="authHeading"><span className="authEyebrow">{mode==='register'?'NEW ACCOUNT':'WELCOME BACK'}</span><h2>{mode==='login'?(isManager?'Administrator sign in':'Sign in to your workspace'):isManager?'Create an administrator account':'Create your employee account'}</h2><p>{mode==='login'?'Use your username or registered email to continue.':isManager?'You will need the private invite code from your organization.':'Your service desk profile starts here.'}</p></div>
     {error&&<div className="error" role="alert">{error}</div>}
     <form onSubmit={submit} aria-busy={busy} className={mode==='register'?'registrationForm':''}>
@@ -123,7 +124,7 @@ function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole,theme,setThem
      {mode==='register'&&<><label>Confirm password<input name="confirm_password" type={showPassword?'text':'password'} required minLength="6" maxLength="256" autoComplete="new-password" placeholder="Repeat your password"/></label><small className="formHelp">Use at least 6 characters.</small></>}
      <button className="primary authSubmit" disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':isManager?'Create administrator account':'Create employee account'}</button>
     </form>
-    {mode==='login'&&<button type="button" className="authRecoveryLink" onClick={()=>{setRecoveryError('');setShowRecovery(true)}}>Forgot organization password?</button>}
+    {mode==='login'&&<button type="button" className="authRecoveryLink" disabled={busy} onClick={()=>void openRecovery()}>Forgot organization password?</button>}
    </>}
    <div className="authPanelFoot"><ShieldCheck size={15}/>Your account is protected by role based access.</div>
   </div></section>
