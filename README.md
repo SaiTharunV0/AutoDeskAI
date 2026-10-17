@@ -9,8 +9,8 @@ AutoDeskAI is an IT helpdesk prototype with a FastAPI backend, PostgreSQL databa
 - The assistant is limited to organization password change/reset, approved software installation, application access, clarification, help, and the signed-in user's own request statuses. General questions, prompt-injection attempts, and unrelated tasks receive a fixed scope response and are not sent to Ollama. Only a sanitized representation of supported workflow messages reaches the classifier. Raw messages are not stored; tracked service requests retain only their sanitized allowed-token representation.
 - Authenticated chat submissions use persistent per-user PostgreSQL counters: 10 per minute, 60 per hour, and 5 consecutive out-of-scope attempts per minute by default. Requests over a limit return HTTP 429 with `Retry-After`. Messages are limited to 2,000 characters.
 - Password change requests open Microsoft's hosted My Account. Organization password reset uses Microsoft Entra SSPR at the configured `MICROSOFT_SSPR_URL` (default `https://passwordreset.microsoftonline.com/`). AutoDeskAI cannot verify the outcome and leaves reset requests at `AWAITING_USER_ACTION`. The AutoDeskAI login password is separate.
-- VS Code installation is simulated by an enrolled, online endpoint agent. Tableau access is a backend policy decision; it does not provision an external account.
-- Administrators can review requests, users, devices, audit history, and existing software and application policies. They can enroll and disable endpoint devices.
+- VS Code installation is simulated by an enrolled, online endpoint agent. Application access uses a configurable backend approval policy and records simulated provisioning; it does not grant an external account.
+- Administrators can review requests, users, devices, audit history, and application catalog and approval policies. They can decide pending access requests, enroll and disable endpoint devices.
 
 ## Requirements
 
@@ -65,12 +65,24 @@ Wait for a heartbeat before submitting an installation request. The agent only s
 
 ## Workflows
 
+### Application access
+
+The employee **Application Access** page loads enabled entries from `GET /access/applications`. Employees choose an application, one of its requestable roles, a duration, and a business justification. Their JWT determines the requester; `GET /access/requests` and `GET /access/requests/{id}` return only their own records. The existing chat can still identify Tableau access requests; it uses the same backend evaluator and the catalog's default role and duration. Other catalog entries are requested through the dedicated page.
+
+The admin **Application Access** page creates and edits entries, shows the approval queue, records approve/reject decisions with reasons, and displays request history, policy versions, evaluated conditions, and provisioning status. `POST /admin/access/applications` creates an entry; `PUT /admin/access/applications/{key}` increments its version and stores an immutable snapshot in `access_policy_revisions`. Existing requests retain their evaluated policy version. The older `PUT /admin/applications/{key}` route remains available for its enabled/role controls and also increments the version.
+
+The built-in Tableau entry is an **example**, with `ADMIN_ONLY` approval by default. Admins can add further applications, including GitHub, Jira, or Power BI, but catalog registration alone does not create an integration. Policies have `AUTOMATIC`, `CONDITIONAL`, and `ADMIN_ONLY` modes, requestable and human-only roles, allowed groups, durations, risk, conditions, and `REQUIRE_ADMIN_APPROVAL` or `DENY` fallback. Automatic approval requires `auto_allowed`, an eligible low/medium-risk role, and every condition to pass. High-risk and human-only roles always require an administrator. The local JWT has no trusted directory group, HR employment, or verified MFA claims, so those conditions evaluate as **unverified** and take the fallback. A failed condition also takes the fallback. The evaluator records its condition results, decision, fallback and policy version on each request, with audit entries for evaluation and manual decisions. Administrators cannot decide their own requests.
+
+Approval is separate from provisioning. Approved requests use `APPROVED_PROVISIONING_REQUIRED`; they do not become `GRANTED`. The built-in `MOCK` provider validates the application and role, records `SIMULATED`, and makes no external grant. `NONE` records `NOT_CONFIGURED`. A provider timeout or failure is recorded as `TIMEOUT` or `FAILED`; an administrator can retry those attempts through `POST /admin/access/requests/{id}/provisioning/retry`. Retry attempts are counted and audited. No production provider, real access expiration, or revocation job is configured. `config_ref` is only an uppercase configuration *reference*, never a credential, and is omitted from employee catalog responses. Production integrations would need official provider APIs, backend-only credentials and permission scope, idempotent grant and verification, and expiration/revocation handling before a request could be marked granted.
+
+At startup, `upgrade_application_access()` adds catalog and access-request columns to existing installations without deleting records. A new `access_policy_revisions` table is created by SQLAlchemy. Legacy demo approvals that explicitly said no external access was provisioned are corrected to `APPROVED_PROVISIONING_REQUIRED` and audited. The backend deploy on Render runs this migration at startup; Vercel's existing `/api` rewrite already forwards the new routes. No new environment variables are required for the mock provider.
+
 | Request | Result |
 | --- | --- |
 | “I forgot my password” | Creates a reset request and offers Microsoft's hosted reset page. Completion remains unverified. |
 | “I need to change my password” | Creates a change request and offers Microsoft My Account. Completion remains unverified. |
 | “Install VS Code” | Requires an active enrolled device with an online agent and an enabled software policy. The agent reports a simulated result. |
-| “I need access to Tableau” | Applies the configured access policy and records a demo approval or rejection. |
+| “I need access to Tableau” | Evaluates the current catalog policy; may await an admin, be denied, or be approved pending real provisioning. |
 | “Hello” or “help” | Receives a fixed help response without a request record or model call. |
 | “What is the status of my requests?” | Shows the signed-in user's 10 most recent statuses without exposing request text. |
 | General questions or unrelated tasks | Receives a fixed out-of-scope response; no model call or request record is created. Repeated attempts are rate limited. |
@@ -102,9 +114,9 @@ The Render blueprint configures Ollama Cloud and chatbot limits. The backend env
 | Authentication | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` |
 | Requests | `POST /requests` (alias `POST /ai/request`), `GET /requests`, `GET /requests/{id}`, `GET /requests/{id}/history` |
 | Password action | `POST /requests/{id}/password/action` |
-| Employee data | `GET /devices`, `GET /catalog` |
+| Employee data | `GET /devices`, `GET /catalog`, `GET /access/applications`, `POST /access/requests`, `GET /access/requests`, `GET /access/requests/{id}` |
 | Endpoint agent | `POST /agent/register`, `GET /agent/heartbeat`, `GET /agent/tasks`, `POST /agent/tasks/{id}/result` |
-| Administration | `GET /admin/users`, `GET /admin/requests`, `GET /admin/devices`, `GET /admin/audit`, policy and device update routes |
+| Administration | `GET /admin/users`, `GET /admin/requests`, `GET /admin/devices`, `GET /admin/audit`, `/admin/access/applications`, `/admin/access/pending`, `/admin/access/requests`, `/admin/access/requests/{id}/decision`, policy and device update routes |
 | Health | `GET /`, admin-only `GET /db-test` |
 
 Request creation uses a client-generated `idempotency_key`; retry an uncertain submission with the same key. A clarification reply supplies the owned request's `previous_request_id`. In-scope chat/help/status and out-of-scope replies return HTTP 200 with intent `CHAT` and no request ID; created requests return HTTP 201. Chat submissions require a valid AutoDeskAI JWT. Limits are applied before any model call; HTTP 429 includes `Retry-After` seconds.

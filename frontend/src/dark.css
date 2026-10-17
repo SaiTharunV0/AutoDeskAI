@@ -171,3 +171,8 @@
 [data-theme="dark"] .status.rejected,
 [data-theme="dark"] .status.disabled,
 [data-theme="dark"] .connectionStatus.disabled { background: #592d2e; color: #ffbbb6; }
+
+[data-theme="dark"] .pagination button,
+[data-theme="dark"] .paginationSize select { background: var(--paper); color: var(--ink); }
+[data-theme="dark"] .status.awaiting_admin { background: #5b4727; color: #ffe0a0; }
+[data-theme="dark"] .status.approved_provisioning_required { background: #254b58; color: #b9ecf5; }

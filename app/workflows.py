@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -131,17 +132,15 @@ def create_workflow(db, user, payload):
         audit(db, user.id, "SOFTWARE_INSTALL_REQUESTED", "request", request.id, request.status)
     elif result.intent == Intent.ACCESS_REQUEST:
         key = (result.application or "").strip().lower()
-        policy = db.get(ApplicationPolicy, key) if key in APPLICATIONS else None
-        allowed = bool(key in safe.split() and policy and policy.enabled and
-                       (policy.required_role == "employee" or user.role == "admin"))
-        request.status = "COMPLETED" if allowed else "REJECTED"
-        request.message = ("Access approved in the demo policy service; no external application was provisioned."
-                           if allowed else "Application access rejected by backend policy.")
-        db.add(AccessRequest(request_id=request.id, user_id=user.id,
-            application=key if key in APPLICATIONS else "unknown", status=request.status,
-            decision_reason=request.message))
-        audit(db, user.id, "ACCESS_REQUESTED", "request", request.id, "PENDING")
-        audit(db, user.id, "ACCESS_GRANTED" if allowed else "ACCESS_REJECTED", "request", request.id, request.status)
+        policy = db.get(ApplicationPolicy, key) if key in safe.split() else None
+        if not policy or not policy.enabled or (policy.required_role == 'admin' and user.role != 'admin'):
+            request.status, request.message = 'REJECTED', 'Application is unavailable or not requestable.'
+            audit(db, user.id, 'ACCESS_REJECTED', 'request', request.id, request.status)
+        else:
+            from app.access import submit_access
+            role = json.loads(policy.requestable_roles_json)[0]
+            submit_access(db, user, key, role, '', policy.default_duration_days,
+                          payload.idempotency_key, existing_request=request)
     elif result.intent == Intent.CLARIFICATION:
         request.status = "NEEDS_CLARIFICATION"
         # Never relay arbitrary model prose or credentials back into history.

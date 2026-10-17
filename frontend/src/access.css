@@ -1,0 +1,23 @@
+.accessPage { display: grid; gap: 18px; }
+.accessPage h1, .accessPage h2, .accessPage p { margin: 0; }
+.accessPage h2 { margin-top: 10px; }
+.accessCatalog { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.accessApp { display: grid; gap: 5px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); text-align: left; cursor: pointer; }
+.accessApp small, .accessApp span, .accessHistoryRow small { color: var(--muted); }
+.accessApp.selected { border-color: var(--teal); box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 20%, transparent); }
+.accessForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+.accessForm h2, .accessForm p, .accessForm button { grid-column: 1 / -1; }
+.accessForm label { display: grid; gap: 5px; }
+.accessForm textarea { min-height: 76px; padding: 10px; }
+.accessForm input, .accessForm select { padding: 8px 10px; }
+.accessForm .accessCheck { display: flex; align-items: center; gap: 8px; }
+.accessCheck input { min-height: auto; }
+.accessHistory { display: grid; gap: 10px; }
+.accessHistoryRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.accessHistoryRow > div:first-child { display: grid; }
+.accessHistoryRow > p, .accessHistoryRow > small, .accessHistoryRow > details, .accessActions { grid-column: 1 / -1; }
+.accessHistoryRow details { color: var(--muted); overflow-wrap: anywhere; }
+.accessActions { display: flex; gap: 8px; }
+.accessActions button { padding: 8px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); cursor: pointer; }
+.accessNotice { padding: 12px; border-radius: 8px; background: var(--soft); color: var(--teal); }
+@media (max-width: 560px) { .accessHistoryRow { grid-template-columns: 1fr; } }

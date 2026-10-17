@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 import hashlib
 import hmac
 import secrets
+import json
 from urllib.parse import urlsplit
 from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
@@ -11,11 +12,12 @@ from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import select, text, or_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import Session, selectinload
-from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profile, upgrade_query_indexes
+from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profile, upgrade_query_indexes, upgrade_application_access
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS
 from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests
+from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, correct_legacy_access_requests
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
 from agent import UnsafeRequest, close_model_client
@@ -26,15 +28,26 @@ async def lifespan(app):
     validate_config()
     Base.metadata.create_all(engine)
     upgrade_user_profile()
+    upgrade_application_access()
     upgrade_query_indexes()
     with SessionLocal() as db:
         correct_legacy_password_requests(db)
+        correct_legacy_access_requests(db)
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
         for key in APPLICATIONS:
             if not db.get(ApplicationPolicy, key):
-                db.add(ApplicationPolicy(key=key))
+                db.add(ApplicationPolicy(key=key, display_name=APPLICATIONS[key] + ' (example)',
+                    description='Example catalog entry. No live provisioning integration is configured.'))
+        db.flush()
+        for row in db.scalars(select(ApplicationPolicy)):
+            recorded = db.scalar(select(AccessPolicyRevision.id).where(
+                AccessPolicyRevision.application_key == row.key,
+                AccessPolicyRevision.version == row.version))
+            if not recorded:
+                db.add(AccessPolicyRevision(application_key=row.key, version=row.version,
+                    actor_id=None, snapshot_json=json.dumps(catalog_view(row), sort_keys=True)))
         db.commit()
     try:
         yield
@@ -370,8 +383,8 @@ def audit_logs(user=Depends(require_admin), db: Session = Depends(get_db)):
 def catalog(user=Depends(get_current_user), db: Session = Depends(get_db)):
     return {"software": [{"key": p.key, "display_name": SOFTWARE[p.key]["display_name"], "enabled": p.enabled}
                         for p in db.scalars(select(SoftwarePolicy)) if p.key in SOFTWARE],
-            "applications": [{"key": p.key, "enabled": p.enabled, "required_role": p.required_role}
-                        for p in db.scalars(select(ApplicationPolicy)) if p.key in APPLICATIONS]}
+            "applications": [{key: value for key, value in catalog_view(p).items() if key != 'config_ref'}
+                        for p in db.scalars(select(ApplicationPolicy))]}
 
 @app.put("/admin/software/{key}", tags=["Admin"])
 def software_policy(key: str, payload: PolicyIn, user=Depends(require_admin), db: Session = Depends(get_db)):
@@ -385,10 +398,79 @@ def software_policy(key: str, payload: PolicyIn, user=Depends(require_admin), db
 
 @app.put("/admin/applications/{key}", tags=["Admin"])
 def application_policy(key: str, payload: PolicyIn, user=Depends(require_admin), db: Session = Depends(get_db)):
-    if key not in APPLICATIONS:
-        raise HTTPException(400, "Unknown application")
     row = db.get(ApplicationPolicy, key)
-    row.enabled, row.required_role = payload.enabled, payload.required_role
-    audit(db, user.id, "APPLICATION_POLICY_UPDATED", "policy", None, "COMPLETED", key)
-    db.commit()
-    return {"key": key, "enabled": row.enabled, "required_role": row.required_role}
+    if not row:
+        raise HTTPException(404, "Unknown application")
+    values = catalog_view(row)
+    values.pop('version')
+    return save_policy(db, row, ApplicationIn(**{
+        **values, 'enabled': payload.enabled, 'required_role': payload.required_role}), user.id)
+
+@app.get('/access/applications', tags=['Application access'])
+def requestable_applications(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    return [{key: value for key, value in catalog_view(row).items() if key != 'config_ref'}
+            for row in db.scalars(select(ApplicationPolicy).where(
+        ApplicationPolicy.enabled == True).order_by(ApplicationPolicy.display_name))
+        if row.required_role == 'employee' or user.role == 'admin']
+
+@app.post('/access/requests', response_model=AccessOut, status_code=201, tags=['Application access'])
+def create_access_request(payload: AccessSubmit, user=Depends(get_current_user),
+                          db: Session = Depends(get_db)):
+    return submit_access(db, user, payload.application, payload.requested_role,
+        payload.justification, payload.duration_days, payload.idempotency_key)
+
+@app.get('/access/requests', response_model=list[AccessOut], tags=['Application access'])
+def my_access_requests(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.scalars(select(AccessRequest).where(AccessRequest.user_id == user.id)
+        .order_by(AccessRequest.id.desc()).limit(500)).all()
+
+@app.get('/access/requests/{access_id}', response_model=AccessOut, tags=['Application access'])
+def my_access_request(access_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    row = db.get(AccessRequest, access_id)
+    if not row or row.user_id != user.id:
+        raise HTTPException(404, 'Access request not found')
+    return row
+
+@app.get('/admin/access/applications', tags=['Admin application access'])
+def all_applications(user=Depends(require_admin), db: Session = Depends(get_db)):
+    return [catalog_view(row) for row in db.scalars(select(ApplicationPolicy).order_by(ApplicationPolicy.key))]
+
+@app.post('/admin/access/applications', status_code=201, tags=['Admin application access'])
+def add_application(payload: ApplicationIn, user=Depends(require_admin), db: Session = Depends(get_db)):
+    if db.get(ApplicationPolicy, payload.key):
+        raise HTTPException(409, 'Application ID already exists')
+    return save_policy(db, ApplicationPolicy(key=payload.key), payload, user.id)
+
+@app.put('/admin/access/applications/{key}', tags=['Admin application access'])
+def edit_application(key: str, payload: ApplicationIn, user=Depends(require_admin), db: Session = Depends(get_db)):
+    if payload.key != key:
+        raise HTTPException(422, 'Application ID cannot be changed')
+    row = db.scalar(select(ApplicationPolicy).where(ApplicationPolicy.key == key).with_for_update())
+    if not row:
+        raise HTTPException(404, 'Application not found')
+    return save_policy(db, row, payload, user.id)
+
+@app.get('/admin/access/applications/{key}/revisions', tags=['Admin application access'])
+def policy_revisions(key: str, user=Depends(require_admin), db: Session = Depends(get_db)):
+    return [{'version': row.version, 'actor_id': row.actor_id, 'snapshot': json.loads(row.snapshot_json),
+             'created_at': row.created_at} for row in db.scalars(select(AccessPolicyRevision).where(
+                AccessPolicyRevision.application_key == key).order_by(AccessPolicyRevision.version.desc()))]
+
+@app.get('/admin/access/requests', response_model=list[AccessOut], tags=['Admin application access'])
+def all_access_requests(user=Depends(require_admin), db: Session = Depends(get_db)):
+    return db.scalars(select(AccessRequest).order_by(AccessRequest.id.desc()).limit(500)).all()
+
+@app.get('/admin/access/pending', response_model=list[AccessOut], tags=['Admin application access'])
+def pending_access_requests(user=Depends(require_admin), db: Session = Depends(get_db)):
+    return db.scalars(select(AccessRequest).where(AccessRequest.status == 'AWAITING_ADMIN')
+        .order_by(AccessRequest.id).limit(500)).all()
+
+@app.post('/admin/access/requests/{access_id}/decision', response_model=AccessOut, tags=['Admin application access'])
+def admin_access_decision(access_id: int, payload: AccessDecisionIn, user=Depends(require_admin),
+                          db: Session = Depends(get_db)):
+    return decide_access(db, access_id, user, payload.decision, payload.reason)
+
+@app.post('/admin/access/requests/{access_id}/provisioning/retry', response_model=AccessOut,
+          tags=['Admin application access'])
+def admin_retry_provisioning(access_id: int, user=Depends(require_admin), db: Session = Depends(get_db)):
+    return retry_provisioning(db, access_id, user)

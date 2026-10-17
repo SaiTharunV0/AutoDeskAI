@@ -33,3 +33,49 @@ def upgrade_query_indexes(db_engine=engine):
         for index in table.indexes:
             if index.name in names:
                 index.create(db_engine, checkfirst=True)
+
+def upgrade_application_access(db_engine=engine):
+    """Add catalog and request lifecycle fields without replacing existing records."""
+    additions = {
+        'application_policies': {
+            'display_name': "VARCHAR(100) NOT NULL DEFAULT ''",
+            'description': "VARCHAR(500) NOT NULL DEFAULT ''",
+            'requestable_roles_json': "VARCHAR(1000) NOT NULL DEFAULT '[\"viewer\"]'",
+            'allowed_groups_json': "VARCHAR(1000) NOT NULL DEFAULT '[]'",
+            'default_duration_days': 'INTEGER NOT NULL DEFAULT 30',
+            'max_duration_days': 'INTEGER NOT NULL DEFAULT 90',
+            'approval_mode': "VARCHAR(30) NOT NULL DEFAULT 'ADMIN_ONLY'",
+            'conditions_json': "VARCHAR(2000) NOT NULL DEFAULT '{}'",
+            'fallback': "VARCHAR(40) NOT NULL DEFAULT 'REQUIRE_ADMIN_APPROVAL'",
+            'human_roles_json': "VARCHAR(1000) NOT NULL DEFAULT '[]'",
+            'risk': "VARCHAR(20) NOT NULL DEFAULT 'LOW'",
+            'provider_type': "VARCHAR(20) NOT NULL DEFAULT 'MOCK'",
+            'config_ref': "VARCHAR(100) NOT NULL DEFAULT ''",
+            'auto_allowed': 'BOOLEAN NOT NULL DEFAULT FALSE',
+            'version': 'INTEGER NOT NULL DEFAULT 1',
+            'updated_at': 'TIMESTAMP',
+        },
+        'access_requests': {
+            'requested_role': "VARCHAR(50) NOT NULL DEFAULT 'viewer'",
+            'justification': "VARCHAR(500) NOT NULL DEFAULT ''",
+            'duration_days': 'INTEGER NOT NULL DEFAULT 30',
+            'approval_route': "VARCHAR(40) NOT NULL DEFAULT 'ADMIN'",
+            'policy_version': 'INTEGER NOT NULL DEFAULT 1',
+            'evaluation_json': "VARCHAR(4000) NOT NULL DEFAULT '{}'",
+            'provisioning_status': "VARCHAR(40) NOT NULL DEFAULT 'NOT_STARTED'",
+            'expires_at': 'TIMESTAMP',
+            'approver_id': 'INTEGER',
+            'decision_at': 'TIMESTAMP',
+            'provisioned_at': 'TIMESTAMP',
+            'provision_attempts': 'INTEGER NOT NULL DEFAULT 0',
+            'last_provision_attempt_at': 'TIMESTAMP',
+        },
+    }
+    with db_engine.begin() as connection:
+        for table, columns in additions.items():
+            existing = {column['name'] for column in inspect(connection).get_columns(table)}
+            for name, definition in columns.items():
+                if name not in existing:
+                    connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {definition}'))
+        connection.execute(text("UPDATE application_policies SET display_name = 'Tableau (example)' WHERE key = 'tableau' AND display_name = ''"))
+        connection.execute(text("UPDATE application_policies SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))

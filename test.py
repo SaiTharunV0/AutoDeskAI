@@ -9,9 +9,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, select, text, event
 from sqlalchemy.pool import StaticPool
 from app import main
-from app.database import Base, get_db, upgrade_user_profile, upgrade_query_indexes
+from app.database import Base, get_db, upgrade_user_profile, upgrade_query_indexes, upgrade_application_access
 from sqlalchemy.orm import sessionmaker
-from app.models import User, SoftwarePolicy, ApplicationPolicy, AuditLog, Device, SoftwareTask, HelpdeskRequest, ChatRateLimitBucket, now
+from app.models import User, SoftwarePolicy, ApplicationPolicy, AccessRequest, AuditLog, Device, SoftwareTask, HelpdeskRequest, ChatRateLimitBucket, now
+from app.access import correct_legacy_access_requests
+from app.provisioning import ProvisioningResult
 from app.workflows import correct_legacy_password_requests, expire_tasks
 from schema import AgentResponse, Intent
 from auth import create_access_token
@@ -170,11 +172,163 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(updated["status"], "AWAITING_USER_ACTION")
         self.assertIn("Legacy simulation", updated["message"])
     def test_access_policy_and_unknown_application(self):
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"COMPLETED")
+        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"AWAITING_ADMIN")
         self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access unknown",application="unknown").json()["status"],"REJECTED")
         self.client.put("/admin/applications/tableau",headers=self.headers(self.admin),
                         json={"enabled":True,"required_role":"admin"})
         self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"REJECTED")
+
+    def access_policy_payload(self, key='github', **changes):
+        return {'key': key, 'display_name': key.title() + ' (example)', 'description': 'No live integration',
+            'enabled': True, 'required_role': 'employee', 'requestable_roles': ['viewer', 'editor'],
+            'allowed_groups': [], 'default_duration_days': 30, 'max_duration_days': 90,
+            'approval_mode': 'ADMIN_ONLY', 'conditions': {}, 'fallback': 'REQUIRE_ADMIN_APPROVAL',
+            'human_roles': [], 'risk': 'LOW', 'provider_type': 'MOCK', 'config_ref': '',
+            'auto_allowed': False, **changes}
+
+    def test_access_catalog_and_permissions(self):
+        payload = self.access_policy_payload()
+        self.assertEqual(self.client.post('/admin/access/applications', json=payload).status_code, 401)
+        self.assertEqual(self.client.post('/admin/access/applications', headers=self.headers(), json=payload).status_code, 403)
+        created = self.client.post('/admin/access/applications', headers=self.headers(self.admin), json=payload)
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()['version'], 1)
+        self.assertEqual(self.client.post('/admin/access/applications', headers=self.headers(self.admin), json=payload).status_code, 409)
+        self.assertIn('github', [item['key'] for item in self.client.get('/access/applications', headers=self.headers()).json()])
+        self.assertEqual(self.client.get('/admin/access/requests', headers=self.headers()).status_code, 403)
+        self.assertEqual(self.client.get('/admin/access/applications', headers=self.headers()).status_code, 403)
+        edited = self.client.put('/admin/access/applications/github', headers=self.headers(self.admin),
+            json={**payload, 'enabled': False})
+        self.assertEqual(edited.json()['version'], 2)
+        self.assertNotIn('github', [item['key'] for item in self.client.get('/access/applications', headers=self.headers()).json()])
+        revisions = self.client.get('/admin/access/applications/github/revisions', headers=self.headers(self.admin)).json()
+        self.assertEqual([item['version'] for item in revisions], [2, 1])
+
+    def test_access_policy_automatic_and_unverified_fallback(self):
+        payload = self.access_policy_payload(approval_mode='CONDITIONAL', auto_allowed=True,
+            conditions={'min_justification_length': 5})
+        self.client.post('/admin/access/applications', headers=self.headers(self.admin), json=payload)
+        submitted = self.client.post('/access/requests', headers=self.headers(), json={
+            'application': 'github', 'requested_role': 'viewer', 'justification': 'Project reporting',
+            'duration_days': 20, 'idempotency_key': secrets.token_hex(16)})
+        self.assertEqual(submitted.status_code, 201)
+        row = submitted.json()
+        self.assertEqual(row['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        self.assertEqual(row['provisioning_status'], 'SIMULATED')
+        self.assertIsNone(row['expires_at'])
+        self.assertEqual(self.client.get('/access/requests/' + str(row['id']), headers=self.headers(self.other)).status_code, 404)
+        self.assertEqual(self.client.post('/admin/access/requests/' + str(row['id']) + '/decision',
+            headers=self.headers(self.admin), json={'decision': 'APPROVE', 'reason': 'already approved'}).status_code, 409)
+        self.client.put('/admin/access/applications/github', headers=self.headers(self.admin),
+            json={**payload, 'conditions': {'require_verified_mfa': True}})
+        fallback = self.client.post('/access/requests', headers=self.headers(self.other), json={
+            'application': 'github', 'requested_role': 'editor', 'justification': 'Project reporting',
+            'duration_days': 20, 'idempotency_key': secrets.token_hex(16)}).json()
+        self.assertEqual(fallback['status'], 'AWAITING_ADMIN')
+        self.assertIn('"verified_mfa": null', fallback['evaluation_json'])
+        self.assertEqual(fallback['policy_version'], 2)
+
+    def test_access_manual_decision_duplicate_and_role_guards(self):
+        payload = self.access_policy_payload(risk='HIGH', approval_mode='AUTOMATIC', auto_allowed=True)
+        self.client.post('/admin/access/applications', headers=self.headers(self.admin), json=payload)
+        request = {'application': 'github', 'requested_role': 'editor', 'justification': 'Need project access',
+                   'duration_days': 30, 'idempotency_key': secrets.token_hex(16)}
+        first = self.client.post('/access/requests', headers=self.headers(), json=request).json()
+        self.assertEqual(first['status'], 'AWAITING_ADMIN')
+        self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json=request).json()['id'], first['id'])
+        self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json={**request,
+            'justification': 'Different reason'}).status_code, 409)
+        self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json={**request,
+            'idempotency_key': secrets.token_hex(16)}).status_code, 409)
+        self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json={**request,
+            'requested_role': 'owner', 'idempotency_key': secrets.token_hex(16)}).status_code, 422)
+        decision_url = '/admin/access/requests/' + str(first['id']) + '/decision'
+        self.assertEqual(self.client.post(decision_url, headers=self.headers(), json={
+            'decision': 'APPROVE', 'reason': 'Business need verified'}).status_code, 403)
+        approved = self.client.post(decision_url, headers=self.headers(self.admin), json={
+            'decision': 'APPROVE', 'reason': 'Business need verified'}).json()
+        self.assertEqual(approved['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        self.assertEqual(approved['approver_id'], self.admin['user']['id'])
+        self.assertEqual(self.client.post(decision_url, headers=self.headers(self.admin), json={
+            'decision': 'REJECT', 'reason': 'Second decision'}).status_code, 409)
+        history = self.client.get(f'/requests/{first["request_id"]}/history', headers=self.headers()).json()
+        self.assertIn('ACCESS_ADMIN_APPROVED', [item['action'] for item in history])
+
+    def test_access_admin_only_and_deny_fallback(self):
+        payload = self.access_policy_payload(approval_mode='ADMIN_ONLY', auto_allowed=True,
+            fallback='DENY')
+        self.client.post('/admin/access/applications', headers=self.headers(self.admin), json=payload)
+        row = self.client.post('/access/requests', headers=self.headers(), json={
+            'application': 'github', 'requested_role': 'viewer', 'duration_days': 30,
+            'idempotency_key': secrets.token_hex(16)}).json()
+        self.assertEqual(row['status'], 'AWAITING_ADMIN')
+        self.client.put('/admin/access/applications/github', headers=self.headers(self.admin),
+            json={**payload, 'approval_mode': 'CONDITIONAL', 'conditions': {'min_justification_length': 10}})
+        denied = self.client.post('/access/requests', headers=self.headers(self.other), json={
+            'application': 'github', 'requested_role': 'viewer', 'duration_days': 30,
+            'idempotency_key': secrets.token_hex(16)}).json()
+        self.assertEqual(denied['status'], 'REJECTED')
+        self.assertEqual(denied['policy_version'], 2)
+
+    def test_provisioning_timeout_failure_and_admin_retry(self):
+        payload = self.access_policy_payload(approval_mode='AUTOMATIC', auto_allowed=True)
+        self.client.post('/admin/access/applications', headers=self.headers(self.admin), json=payload)
+        with patch('app.access.provision', side_effect=TimeoutError):
+            row = self.client.post('/access/requests', headers=self.headers(), json={
+                'application': 'github', 'requested_role': 'viewer', 'duration_days': 30,
+                'idempotency_key': secrets.token_hex(16)}).json()
+        self.assertEqual(row['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        self.assertEqual(row['provisioning_status'], 'TIMEOUT')
+        self.assertEqual(row['provision_attempts'], 1)
+        url = '/admin/access/requests/' + str(row['id']) + '/provisioning/retry'
+        self.assertEqual(self.client.post(url, headers=self.headers()).status_code, 403)
+        with patch('app.access.provision', side_effect=RuntimeError('provider unavailable')):
+            failed = self.client.post(url, headers=self.headers(self.admin)).json()
+        self.assertEqual(failed['provisioning_status'], 'FAILED')
+        with patch('app.access.provision', return_value=ProvisioningResult('SIMULATED', True, False, 'No grant')):
+            retried = self.client.post(url, headers=self.headers(self.admin)).json()
+        self.assertEqual(retried['provisioning_status'], 'SIMULATED')
+        self.assertEqual(retried['provision_attempts'], 3)
+        self.assertIsNone(retried['provisioned_at'])
+        self.assertEqual(self.client.post(url, headers=self.headers(self.admin)).status_code, 409)
+
+    def test_access_self_approval_is_blocked(self):
+        payload = self.access_policy_payload()
+        self.client.post('/admin/access/applications', headers=self.headers(self.admin), json=payload)
+        row = self.client.post('/access/requests', headers=self.headers(self.admin), json={
+            'application': 'github', 'requested_role': 'viewer', 'duration_days': 30,
+            'idempotency_key': secrets.token_hex(16)}).json()
+        self.assertEqual(self.client.post('/admin/access/requests/' + str(row['id']) + '/decision',
+            headers=self.headers(self.admin), json={'decision': 'APPROVE',
+            'reason': 'Approving my own request'}).status_code, 403)
+
+    def test_application_access_migration_preserves_existing_rows(self):
+        old = create_engine('sqlite://')
+        with old.begin() as connection:
+            connection.execute(text('CREATE TABLE application_policies (key VARCHAR(80) PRIMARY KEY, enabled BOOLEAN, required_role VARCHAR(30))'))
+            connection.execute(text("INSERT INTO application_policies VALUES ('tableau', 1, 'employee')"))
+            connection.execute(text('CREATE TABLE access_requests (id INTEGER PRIMARY KEY, request_id INTEGER, user_id INTEGER, application VARCHAR(80), status VARCHAR(30), decision_reason VARCHAR(200), created_at TIMESTAMP)'))
+            connection.execute(text("INSERT INTO access_requests VALUES (1, 1, 1, 'tableau', 'COMPLETED', 'Legacy demo', CURRENT_TIMESTAMP)"))
+        upgrade_application_access(old)
+        upgrade_application_access(old)
+        with old.connect() as connection:
+            self.assertEqual(connection.execute(text("SELECT display_name FROM application_policies WHERE key='tableau'")).scalar(), 'Tableau (example)')
+            self.assertEqual(connection.execute(text('SELECT requested_role FROM access_requests WHERE id=1')).scalar(), 'viewer')
+        old.dispose()
+
+    def test_legacy_demo_access_is_not_reported_as_granted(self):
+        with self.sessions() as db:
+            request = HelpdeskRequest(user_id=self.employee['user']['id'], intent='ACCESS_REQUEST',
+                idempotency_key=secrets.token_hex(16), status='COMPLETED', message='Legacy demo')
+            db.add(request)
+            db.flush()
+            db.add(AccessRequest(request_id=request.id, user_id=request.user_id,
+                application='tableau', status='COMPLETED',
+                decision_reason='Access approved in the demo policy service; no external application was provisioned.'))
+            db.commit()
+            correct_legacy_access_requests(db)
+            self.assertEqual(request.status, 'APPROVED_PROVISIONING_REQUIRED')
+            self.assertEqual(request.access.provisioning_status, 'SIMULATED')
     def test_software_agent_end_to_end(self):
         device = self.enroll()
         row = self.request(Intent.SOFTWARE_INSTALL, "Install VS Code", software="vscode",

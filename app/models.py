@@ -76,6 +76,19 @@ class AccessRequest(Base):
     status: Mapped[str] = mapped_column(String(30))
     decision_reason: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(default=now)
+    requested_role: Mapped[str] = mapped_column(String(50), default="viewer")
+    justification: Mapped[str] = mapped_column(String(500), default="")
+    duration_days: Mapped[int] = mapped_column(default=30)
+    approval_route: Mapped[str] = mapped_column(String(40), default="ADMIN")
+    policy_version: Mapped[int] = mapped_column(default=1)
+    evaluation_json: Mapped[str] = mapped_column(String(4000), default="{}")
+    provisioning_status: Mapped[str] = mapped_column(String(40), default="NOT_STARTED")
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    approver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decision_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    provisioned_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    provision_attempts: Mapped[int] = mapped_column(default=0)
+    last_provision_attempt_at: Mapped[datetime | None] = mapped_column(nullable=True)
     request: Mapped[HelpdeskRequest] = relationship(back_populates="access")
 
 class AuditLog(Base):
@@ -100,6 +113,32 @@ class ApplicationPolicy(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     enabled: Mapped[bool] = mapped_column(default=True)
     required_role: Mapped[str] = mapped_column(String(30), default="employee")
+    display_name: Mapped[str] = mapped_column(String(100), default="")
+    description: Mapped[str] = mapped_column(String(500), default="")
+    requestable_roles_json: Mapped[str] = mapped_column(String(1000), default='["viewer"]')
+    allowed_groups_json: Mapped[str] = mapped_column(String(1000), default="[]")
+    default_duration_days: Mapped[int] = mapped_column(default=30)
+    max_duration_days: Mapped[int] = mapped_column(default=90)
+    approval_mode: Mapped[str] = mapped_column(String(30), default="ADMIN_ONLY")
+    conditions_json: Mapped[str] = mapped_column(String(2000), default="{}")
+    fallback: Mapped[str] = mapped_column(String(40), default="REQUIRE_ADMIN_APPROVAL")
+    human_roles_json: Mapped[str] = mapped_column(String(1000), default="[]")
+    risk: Mapped[str] = mapped_column(String(20), default="LOW")
+    provider_type: Mapped[str] = mapped_column(String(20), default="MOCK")
+    config_ref: Mapped[str] = mapped_column(String(100), default="")
+    auto_allowed: Mapped[bool] = mapped_column(default=False)
+    version: Mapped[int] = mapped_column(default=1)
+    updated_at: Mapped[datetime] = mapped_column(default=now, onupdate=now)
+
+class AccessPolicyRevision(Base):
+    __tablename__ = "access_policy_revisions"
+    __table_args__ = (UniqueConstraint('application_key', 'version'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_key: Mapped[str] = mapped_column(String(80), index=True)
+    version: Mapped[int]
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    snapshot_json: Mapped[str] = mapped_column(String(5000))
+    created_at: Mapped[datetime] = mapped_column(default=now)
 
 class ChatRateLimitBucket(Base):
     """Persistent per-user counters shared by all backend instances."""

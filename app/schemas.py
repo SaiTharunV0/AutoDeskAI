@@ -162,3 +162,84 @@ class AuditOut(BaseModel):
     status: str
     details: str
     timestamp: datetime
+
+class ApplicationIn(Input):
+    key: str = Field(min_length=2, max_length=80, pattern=r'^[a-z][a-z0-9_-]*$')
+    display_name: str = Field(min_length=2, max_length=100)
+    description: str = Field(default='', max_length=500)
+    enabled: bool = True
+    required_role: Literal['employee', 'admin'] = 'employee'
+    requestable_roles: list[str] = Field(min_length=1, max_length=20)
+    allowed_groups: list[str] = Field(default_factory=list, max_length=20)
+    default_duration_days: int = Field(ge=1, le=365)
+    max_duration_days: int = Field(ge=1, le=365)
+    approval_mode: Literal['AUTOMATIC', 'CONDITIONAL', 'ADMIN_ONLY'] = 'ADMIN_ONLY'
+    conditions: dict = Field(default_factory=dict)
+    fallback: Literal['REQUIRE_ADMIN_APPROVAL', 'DENY'] = 'REQUIRE_ADMIN_APPROVAL'
+    human_roles: list[str] = Field(default_factory=list)
+    risk: Literal['LOW', 'MEDIUM', 'HIGH'] = 'LOW'
+    provider_type: Literal['MOCK', 'NONE'] = 'MOCK'
+    config_ref: str = Field(default='', max_length=100, pattern=r'^[A-Z][A-Z0-9_]*$|^$')
+    auto_allowed: bool = False
+
+    @model_validator(mode='after')
+    def policy_rules(self):
+        roles = self.requestable_roles
+        if len(set(roles)) != len(roles) or any(not role or len(role) > 50 or not role.replace('_', '').replace('-', '').isalnum() for role in roles):
+            raise ValueError('Use unique simple role names')
+        if any(role not in roles for role in self.human_roles):
+            raise ValueError('Human approval roles must be requestable')
+        if self.default_duration_days > self.max_duration_days:
+            raise ValueError('Default duration exceeds maximum')
+        allowed = {'min_justification_length', 'max_duration_days', 'require_verified_mfa', 'required_groups', 'employment_status'}
+        if set(self.conditions) - allowed:
+            raise ValueError('Unsupported policy condition')
+        if any(not isinstance(group, str) or not group or len(group) > 80 for group in self.allowed_groups):
+            raise ValueError('Invalid group')
+        if 'min_justification_length' in self.conditions and (type(self.conditions['min_justification_length']) is not int or not 0 <= self.conditions['min_justification_length'] <= 500):
+            raise ValueError('Invalid justification condition')
+        if 'max_duration_days' in self.conditions and (type(self.conditions['max_duration_days']) is not int or not 1 <= self.conditions['max_duration_days'] <= 365):
+            raise ValueError('Invalid duration condition')
+        if 'require_verified_mfa' in self.conditions and type(self.conditions['require_verified_mfa']) is not bool:
+            raise ValueError('Invalid MFA condition')
+        if 'required_groups' in self.conditions and (not isinstance(self.conditions['required_groups'], list)
+                or len(self.conditions['required_groups']) > 20
+                or any(not isinstance(g, str) or not g or len(g) > 80 for g in self.conditions['required_groups'])):
+            raise ValueError('Invalid group condition')
+        if 'employment_status' in self.conditions and self.conditions['employment_status'] != 'ACTIVE':
+            raise ValueError('Unsupported employment condition')
+        return self
+
+class AccessSubmit(Input):
+    application: str = Field(min_length=2, max_length=80)
+    requested_role: str = Field(min_length=1, max_length=50)
+    justification: str = Field(default='', max_length=500)
+    duration_days: int = Field(ge=1, le=365)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+class AccessDecisionIn(Input):
+    decision: Literal['APPROVE', 'REJECT']
+    reason: str = Field(min_length=5, max_length=200)
+
+class AccessOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    request_id: int
+    user_id: int
+    application: str
+    requested_role: str
+    justification: str
+    duration_days: int
+    status: str
+    approval_route: str
+    policy_version: int
+    evaluation_json: str
+    decision_reason: str
+    provisioning_status: str
+    expires_at: datetime | None
+    approver_id: int | None
+    decision_at: datetime | None
+    created_at: datetime
+    provision_attempts: int
+    last_provision_attempt_at: datetime | None
+    provisioned_at: datetime | None
