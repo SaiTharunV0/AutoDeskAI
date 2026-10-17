@@ -4,7 +4,7 @@ from threading import Lock
 import ollama
 import config
 from schema import AgentResponse, Intent
-from prompts import SYSTEM_PROMPT
+from prompts import SYSTEM_PROMPT, CHAT_PROMPT
 from validator import validate_agent_response
 from app.catalog import SOFTWARE, APPLICATIONS
 
@@ -84,10 +84,20 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
         return validate_agent_response(pending)
     if not user_message.strip():
         return AgentResponse(intent=Intent.CHAT, message="Please describe your IT request.")
-    # A greeting or general conversation has no supported service action to track.
+    # General conversation uses its own model prompt and never becomes a request.
     if not words & {"password", "install", "installed", "setup", "download",
                     "access", "permission", "grant"}:
-        return AgentResponse(intent=Intent.CHAT, message="I can help with password change or reset, approved software installation, and application access.")
+        try:
+            response = get_model_client().chat(model=config.OLLAMA_MODEL,
+                messages=[{"role": "system", "content": CHAT_PROMPT},
+                          {"role": "user", "content": user_message.strip()}],
+                think=False, options={"temperature": 0.6, "num_predict": 160})
+            message = response["message"]["content"].strip()
+            if not message:
+                raise ValueError("Empty chat reply")
+            return AgentResponse(intent=Intent.CHAT, message=message[:500])
+        except Exception:
+            raise RuntimeError("AI chat unavailable or returned an invalid response. Please retry.") from None
     try:
         client = get_model_client()
         response = client.chat(model=config.OLLAMA_MODEL,

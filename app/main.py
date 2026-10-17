@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 import hashlib
 import hmac
 import secrets
+from urllib.parse import urlsplit
 from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -216,8 +217,17 @@ def history(request_id: int, user=Depends(get_current_user), db: Session = Depen
 
 MICROSOFT_PASSWORD_URLS = {
     "PASSWORD_CHANGE": "https://myaccount.microsoft.com/",
-    "PASSWORD_RESET": "https://passwordreset.microsoftonline.com/",
 }
+
+def configured_sspr_url():
+    value = config.MICROSOFT_SSPR_URL.strip()
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError
+        return value
+    except ValueError:
+        raise HTTPException(503, "Organization password recovery is unavailable. Contact your IT administrator.") from None
 
 @app.post("/requests/{request_id}/password/action", response_model=PasswordActionOut, tags=["Requests"],
           description="Return the Microsoft-hosted action for the authenticated owner. Opening it does not prove completion.")
@@ -225,15 +235,16 @@ def password_action(request_id: int, user=Depends(get_current_user), db: Session
     row = db.get(HelpdeskRequest, request_id)
     if not row or row.user_id != user.id:
         raise HTTPException(404, "Request not found")
-    if row.intent not in MICROSOFT_PASSWORD_URLS:
+    if row.intent not in (*MICROSOFT_PASSWORD_URLS, "PASSWORD_RESET"):
         raise HTTPException(409, "Not a password workflow")
     if row.status != "AWAITING_USER_ACTION":
         raise HTTPException(409, "Workflow is not awaiting user action")
+    url = configured_sspr_url() if row.intent == "PASSWORD_RESET" else MICROSOFT_PASSWORD_URLS[row.intent]
     audit(db, user.id, row.intent + "_LINK_OPENED", "request", row.id, row.status,
           "Microsoft-hosted action issued; completion unverified")
     db.commit()
     return PasswordActionOut(request_id=row.id, status=row.status,
-        url=MICROSOFT_PASSWORD_URLS[row.intent], message=row.message)
+        url=url, message=row.message)
 
 @app.get("/devices", response_model=list[DeviceOut], tags=["Devices"])
 def own_devices(user=Depends(get_current_user), db: Session = Depends(get_db)):

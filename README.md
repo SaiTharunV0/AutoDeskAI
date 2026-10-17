@@ -6,8 +6,8 @@ AutoDeskAI is an IT helpdesk prototype with a FastAPI backend, PostgreSQL databa
 
 - Employees and administrators register with first name, last name, date of birth, username, email, and password. Administrator registration requires a private `ADMIN_REGISTRATION_CODE` configured on the backend. Sign in with username or email through the matching employee or admin portal.
 - The browser keeps the access token in tab session storage. Reloading the tab restores the account through `GET /auth/me`; an expired token requires sign-in again. Storage lasts for the browser tab's session.
-- General chat receives a help reply without creating a request. Supported service requests and clarification replies are tracked in request history.
-- Password change and reset requests open Microsoft's hosted My Account or Self-Service Password Reset pages. AutoDeskAI cannot verify the outcome and leaves these requests at `AWAITING_USER_ACTION`. The AutoDeskAI login password is separate.
+- General chat receives a conversational reply from the configured Ollama model without creating a request. Its text is sent to that model but is not stored in request history. Supported service requests and clarification replies are tracked.
+- Password change requests open Microsoft's hosted My Account. Organization password reset uses Microsoft Entra SSPR at the configured `MICROSOFT_SSPR_URL` (default `https://passwordreset.microsoftonline.com/`). AutoDeskAI cannot verify the outcome and leaves reset requests at `AWAITING_USER_ACTION`. The AutoDeskAI login password is separate.
 - VS Code installation is simulated by an enrolled, online endpoint agent. Tableau access is a backend policy decision; it does not provision an external account.
 - Administrators can review requests, users, devices, audit history, and existing software and application policies. They can enroll and disable endpoint devices.
 
@@ -32,6 +32,10 @@ Create an empty PostgreSQL database and set its `DATABASE_URL` in the ignored `.
 ```
 
 Set `ADMIN_REGISTRATION_CODE` privately if administrators should register through the UI. Set `OLLAMA_HOST`, `OLLAMA_MODEL`, and, for a hosted model, `OLLAMA_API_KEY`. The local defaults in `.env.example` use `qwen3:8b` at `http://localhost:11434`; install and start that model or choose one you have available. Keep `.env` out of source control.
+
+Set backend `MICROSOFT_SSPR_URL` to the organization's HTTPS Microsoft Entra self-service password reset URL. For the standard work or school account experience use `https://passwordreset.microsoftonline.com/`. Set frontend build variable `VITE_MICROSOFT_SSPR_URL` to the same URL so the logged-out login page can link directly; the frontend validates HTTPS and accepts no user-provided redirect. The Vercel value is public URL configuration, not a secret. Configure it under Vercel Project Settings → Environment Variables and redeploy. Configure `MICROSOFT_SSPR_URL` on the Render backend as well; `render.yaml` supplies the standard Microsoft URL by default.
+
+In Microsoft Entra, an administrator must enable SSPR for the intended users (or group), configure allowed authentication methods and registration, and configure password writeback if synchronized on-premises accounts must be reset in the cloud. Licensing and hybrid writeback requirements depend on the tenant. If a user is not enabled, lacks registered verification methods, or the tenant requires administrator assistance, Microsoft displays its own guidance; users should contact their IT administrator. Test with a dedicated test account only. Password reset is recovery after forgetting a password; `PASSWORD_CHANGE` is for a user who knows the current password and continues through Microsoft My Account. AutoDeskAI does not receive credentials or verify reset completion. See [Microsoft's SSPR overview](https://learn.microsoft.com/en-us/entra/identity/authentication/concept-sspr-howitworks), [enablement guide](https://learn.microsoft.com/en-us/entra/identity/authentication/tutorial-enable-sspr), and [work or school password help](https://learn.microsoft.com/en-us/microsoft-365/troubleshoot/sign-in/forgot-sign-in-password).
 
 Start the backend and frontend in separate terminals:
 

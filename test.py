@@ -125,6 +125,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn(self.password, str(history))
         self.assertNotIn(self.employee["access_token"], str(history))
 
+    def test_password_reset_uses_validated_configuration_without_completion(self):
+        row = self.request(Intent.PASSWORD_RESET, "forgot password").json()
+        with patch.object(main.config, "MICROSOFT_SSPR_URL", "https://tenant.example/reset"):
+            response = self.client.post(f'/requests/{row["id"]}/password/action', headers=self.headers())
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["url"], "https://tenant.example/reset")
+        with patch.object(main.config, "MICROSOFT_SSPR_URL", "http://unsafe.example/reset"):
+            response = self.client.post(f'/requests/{row["id"]}/password/action', headers=self.headers())
+            self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.client.get(f'/requests/{row["id"]}', headers=self.headers()).json()["status"],
+                         "AWAITING_USER_ACTION")
+        self.assertEqual(self.client.get("/auth/me").status_code, 401)
+
     def test_password_change_and_rate_limit(self):
         row = self.request(Intent.PASSWORD_CHANGE, "change my password").json()
         action = self.client.post(f'/requests/{row["id"]}/password/action', headers=self.headers()).json()
@@ -207,12 +220,15 @@ class WorkflowTests(unittest.TestCase):
 
     def test_general_chat_does_not_create_request(self):
         before = len(self.client.get('/requests', headers=self.headers()).json())
-        for message in ('hello', 'how are you', 'Tableau'):
-            response = self.client.post('/requests', headers=self.headers(), json={
-                'message': message, 'idempotency_key': secrets.token_hex(16)})
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()['intent'], 'CHAT')
-            self.assertIsNone(response.json()['id'])
+        with patch('app.workflows.process_request', side_effect=lambda message, previous:
+                   AgentResponse(intent=Intent.CHAT, message=f'AI reply to {message}')):
+            for message in ('hello', 'how are you', 'Tableau'):
+                response = self.client.post('/requests', headers=self.headers(), json={
+                    'message': message, 'idempotency_key': secrets.token_hex(16)})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()['intent'], 'CHAT')
+                self.assertEqual(response.json()['message'], f'AI reply to {message}')
+                self.assertIsNone(response.json()['id'])
         self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), before)
         with self.sessions() as db:
             self.assertEqual(db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.user_id == self.employee['user']['id'])), None)
@@ -433,9 +449,19 @@ class AITests(unittest.TestCase):
             result,_=self.classify(message,AgentResponse(intent=intent,message="test",**field))
             self.assertEqual(result.intent,Intent.CLARIFICATION if message=="install" else intent)
     def test_ambiguous_request(self):
-        result,client=self.classify("Tableau",AgentResponse(intent=Intent.ACCESS_REQUEST,application="tableau",message="test"))
+        with patch('agent.get_model_client') as client:
+            client.return_value.chat.return_value={'message': {'content': 'Tableau is a data visualization tool.'}}
+            result=process_request('Tableau')
         self.assertEqual(result.intent,Intent.CHAT)
-        client.assert_not_called()
+        self.assertEqual(result.message, 'Tableau is a data visualization tool.')
+        self.assertEqual(client.return_value.chat.call_args.kwargs['messages'][-1]['content'], 'Tableau')
+    def test_general_chat_uses_original_text(self):
+        with patch('agent.get_model_client') as client:
+            client.return_value.chat.return_value={'message': {'content': "I'm doing well. How can I help?"}}
+            result=process_request('How r u?')
+        self.assertEqual(result.intent, Intent.CHAT)
+        self.assertEqual(result.message, "I'm doing well. How can I help?")
+        self.assertEqual(client.return_value.chat.call_args.kwargs['messages'][-1]['content'], 'How r u?')
     def test_no_raw_text_sent(self):
         marker=secrets.token_hex(20)
         _,client=self.classify("install "+marker,AgentResponse(intent=Intent.CHAT,message="hi"))

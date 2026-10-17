@@ -86,7 +86,7 @@ def create_workflow(db, user, payload):
         db.commit()
         raise
     if result.intent == Intent.CHAT:
-        return ChatOut(message="I can help with password change or reset, approved software installation, and application access.")
+        return ChatOut(message=result.message)
     request = HelpdeskRequest(user_id=user.id, intent=result.intent.value,
                               original_message=safe[:200], idempotency_key=payload.idempotency_key)
     db.add(request)

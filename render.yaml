@@ -25,3 +25,5 @@ services:
         value: "600"
       - key: DEVICE_OFFLINE_SECONDS
         value: "120"
+      - key: MICROSOFT_SSPR_URL
+        value: https://passwordreset.microsoftonline.com/
