@@ -84,7 +84,7 @@ class TokenOut(BaseModel):
     user: UserOut
 
 class RequestIn(Input):
-    message: str = Field(min_length=1, max_length=1000)
+    message: str = Field(min_length=1, max_length=2000)
     device_id: int | None = None
     previous_request_id: int | None = None
     idempotency_key: str = Field(min_length=8, max_length=100)

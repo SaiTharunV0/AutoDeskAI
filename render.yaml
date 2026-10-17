@@ -21,6 +21,14 @@ services:
         sync: false
       - key: OLLAMA_TIMEOUT
         value: "90"
+      - key: CHAT_RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: CHAT_RATE_LIMIT_PER_HOUR
+        value: "60"
+      - key: CHAT_OUT_OF_SCOPE_LIMIT_PER_MINUTE
+        value: "5"
+      - key: CHAT_MAX_MESSAGE_LENGTH
+        value: "2000"
       - key: TASK_TIMEOUT_SECONDS
         value: "600"
       - key: DEVICE_OFFLINE_SECONDS

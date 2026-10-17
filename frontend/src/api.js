@@ -5,10 +5,11 @@ export const SESSION_ERROR = 'Your session expired. Please sign in again.';
 export const isConnectionError = message => [NETWORK_ERROR, TIMEOUT_ERROR, GATEWAY_ERROR].includes(message);
 
 export class ApiError extends Error {
-  constructor(message, status = 0) {
+  constructor(message, status = 0, retryAfter = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -36,7 +37,10 @@ export async function requestApi(path, {token = '', timeoutMs = 60000, fetchImpl
         : Array.isArray(detail) ? detail.map(item => item.msg).join('. ')
         : response.status >= 500 ? GATEWAY_ERROR
         : `Request failed (${response.status}). Please try again.`;
-      throw new ApiError(message, response.status);
+      const retryAfterHeader = response.headers?.get?.('Retry-After');
+      const parsedRetryAfter = retryAfterHeader && /^\d+$/.test(retryAfterHeader.trim())
+        ? Number(retryAfterHeader.trim()) : null;
+      throw new ApiError(message, response.status, parsedRetryAfter);
     }
     if (data === undefined) throw new ApiError('The server returned an unreadable response.', response.status);
     return data;

@@ -6,7 +6,8 @@ AutoDeskAI is an IT helpdesk prototype with a FastAPI backend, PostgreSQL databa
 
 - Employees and administrators register with first name, last name, date of birth, username, email, and password. Administrator registration requires a private `ADMIN_REGISTRATION_CODE` configured on the backend. Sign in with username or email through the matching employee or admin portal.
 - The browser keeps the access token in tab session storage. Reloading the tab restores the account through `GET /auth/me`; an expired token requires sign-in again. Storage lasts for the browser tab's session.
-- General chat receives a conversational reply from the configured Ollama model without creating a request. Its text is sent to that model but is not stored in request history. Supported service requests and clarification replies are tracked.
+- The assistant is limited to organization password change/reset, approved software installation, application access, clarification, help, and the signed-in user's own request statuses. General questions, prompt-injection attempts, and unrelated tasks receive a fixed scope response and are not sent to Ollama. Only a sanitized representation of supported workflow messages reaches the classifier. Raw messages are not stored; tracked service requests retain only their sanitized allowed-token representation.
+- Authenticated chat submissions use persistent per-user PostgreSQL counters: 10 per minute, 60 per hour, and 5 consecutive out-of-scope attempts per minute by default. Requests over a limit return HTTP 429 with `Retry-After`. Messages are limited to 2,000 characters.
 - Password change requests open Microsoft's hosted My Account. Organization password reset uses Microsoft Entra SSPR at the configured `MICROSOFT_SSPR_URL` (default `https://passwordreset.microsoftonline.com/`). AutoDeskAI cannot verify the outcome and leaves reset requests at `AWAITING_USER_ACTION`. The AutoDeskAI login password is separate.
 - VS Code installation is simulated by an enrolled, online endpoint agent. Tableau access is a backend policy decision; it does not provision an external account.
 - Administrators can review requests, users, devices, audit history, and existing software and application policies. They can enroll and disable endpoint devices.
@@ -70,7 +71,9 @@ Wait for a heartbeat before submitting an installation request. The agent only s
 | “I need to change my password” | Creates a change request and offers Microsoft My Account. Completion remains unverified. |
 | “Install VS Code” | Requires an active enrolled device with an online agent and an enabled software policy. The agent reports a simulated result. |
 | “I need access to Tableau” | Applies the configured access policy and records a demo approval or rejection. |
-| General chat, such as “hello” | Replies in chat without a request record. |
+| “Hello” or “help” | Receives a fixed help response without a request record or model call. |
+| “What is the status of my requests?” | Shows the signed-in user's 10 most recent statuses without exposing request text. |
+| General questions or unrelated tasks | Receives a fixed out-of-scope response; no model call or request record is created. Repeated attempts are rate limited. |
 
 The employee dashboard shows tracked request counts. Requests refresh while work is pending; device data refreshes periodically. Polling pauses when the tab is hidden, avoids overlapping reads, and refreshes relevant data after actions.
 
@@ -90,7 +93,7 @@ The Python tests use an isolated in-memory SQLite database and mocked model resp
 
 The Vercel frontend uses `frontend/vercel.json` to forward `/api` to `https://autodeskai-backend.onrender.com`. If the Render backend URL changes, update those rewrites. The Render service is defined in `render.yaml`. Configure its private `DATABASE_URL`, `ADMIN_REGISTRATION_CODE`, and `OLLAMA_API_KEY` as needed; Render generates `JWT_SECRET_KEY`. The database URI should use the PostgreSQL session pooler with SSL when required by the provider. Never put backend secrets in Vercel frontend variables.
 
-The Render blueprint configures Ollama Cloud. Local development can use a locally hosted Ollama server. A remote endpoint agent must reach the backend over HTTPS. A sleeping Render free service can delay the first request.
+The Render blueprint configures Ollama Cloud and chatbot limits. The backend environment variables are `CHAT_RATE_LIMIT_PER_MINUTE` (default `10`), `CHAT_RATE_LIMIT_PER_HOUR` (`60`), `CHAT_OUT_OF_SCOPE_LIMIT_PER_MINUTE` (`5`), and `CHAT_MAX_MESSAGE_LENGTH` (`2000`, hard maximum 2,000). Set these on Render as backend runtime variables when changing defaults; `.env.example` contains the local values. No Vercel frontend build variable is required. The `chat_rate_limit_buckets` table is created automatically at backend startup and shares counters across Render instances. Local development can use a locally hosted Ollama server. A remote endpoint agent must reach the backend over HTTPS. A sleeping Render free service can delay the first request.
 
 ## API
 
@@ -104,7 +107,7 @@ The Render blueprint configures Ollama Cloud. Local development can use a locall
 | Administration | `GET /admin/users`, `GET /admin/requests`, `GET /admin/devices`, `GET /admin/audit`, policy and device update routes |
 | Health | `GET /`, admin-only `GET /db-test` |
 
-Request creation uses a client-generated `idempotency_key`; retry an uncertain submission with the same key. A clarification reply supplies the owned request's `previous_request_id`. General chat returns HTTP 200 with intent `CHAT` and no request ID; created requests return HTTP 201.
+Request creation uses a client-generated `idempotency_key`; retry an uncertain submission with the same key. A clarification reply supplies the owned request's `previous_request_id`. In-scope chat/help/status and out-of-scope replies return HTTP 200 with intent `CHAT` and no request ID; created requests return HTTP 201. Chat submissions require a valid AutoDeskAI JWT. Limits are applied before any model call; HTTP 429 includes `Retry-After` seconds.
 
 Startup creates missing tables, upgrades the existing user profile columns and lookup indexes, and seeds absent VS Code and Tableau policies. It does not clear the database. The one-off `_db_clear_once.py --delete` script **deletes all app records and restarts IDs**; running it against a live database removes all accounts, requests, audit records, devices, and policies.
 

@@ -100,3 +100,12 @@ class ApplicationPolicy(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     enabled: Mapped[bool] = mapped_column(default=True)
     required_role: Mapped[str] = mapped_column(String(30), default="employee")
+
+class ChatRateLimitBucket(Base):
+    """Persistent per-user counters shared by all backend instances."""
+    __tablename__ = "chat_rate_limit_buckets"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    bucket_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(primary_key=True)
+    count: Mapped[int] = mapped_column(default=0)
+    updated_at: Mapped[datetime] = mapped_column(default=now, onupdate=now)

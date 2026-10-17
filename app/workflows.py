@@ -8,6 +8,7 @@ from app.catalog import SOFTWARE, APPLICATIONS, software_key
 from app.schemas import ChatOut
 from schema import AgentResponse, Intent
 from agent import process_request, safe_message, UnsafeRequest
+from app.chat_limits import check_chat_rate, record_out_of_scope, reset_out_of_scope
 import config
 
 def audit(db, user_id, action, resource_type, resource_id, status, details=""):
@@ -55,9 +56,11 @@ def create_workflow(db, user, payload):
                            HelpdeskRequest.idempotency_key == payload.idempotency_key))
     if existing:
         return existing
+    check_chat_rate(db, user.id, payload.message)
     try:
         safe = safe_message(payload.message)
     except UnsafeRequest:
+        record_out_of_scope(db, user.id)
         audit(db, user.id, 'REQUEST_REJECTED', 'service', None, 'REJECTED', 'Unsupported action or credential-like input')
         db.commit()
         raise
@@ -85,6 +88,18 @@ def create_workflow(db, user, payload):
         audit(db, user.id, "AI_REQUEST_FAILED", "service", None, "FAILED", "AI unavailable or malformed output")
         db.commit()
         raise
+    if result.intent == Intent.UNSUPPORTED:
+        record_out_of_scope(db, user.id)
+        return ChatOut(message=result.message)
+    reset_out_of_scope(db, user.id)
+    if result.intent == Intent.REQUEST_STATUS:
+        rows = db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.user_id == user.id)
+                          .order_by(HelpdeskRequest.id.desc()).limit(10)).all()
+        if not rows:
+            return ChatOut(message="You don’t have any requests yet. I can help with organization password change/reset, approved software installation, or application access.")
+        lines = [f"#{row.id} · {row.intent.replace('_', ' ').title()} · {row.status.replace('_', ' ').title()}"
+                 for row in rows]
+        return ChatOut(message="Your 10 most recent request statuses:\n" + "\n".join(lines))
     if result.intent == Intent.CHAT:
         return ChatOut(message=result.message)
     request = HelpdeskRequest(user_id=user.id, intent=result.intent.value,

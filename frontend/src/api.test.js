@@ -22,6 +22,14 @@ test('API distinguishes invalid credentials from expired sessions', async () => 
   await assert.rejects(requestApi('/requests', {fetchImpl, token: 'expired'}), {message: SESSION_ERROR});
 });
 
+test('API exposes Retry-After for chatbot throttling', async () => {
+  await assert.rejects(requestApi('/requests', {token: 'employee-token', method: 'POST', body: '{}',
+    fetchImpl: async () => new Response(JSON.stringify({detail: 'Too many chat messages. Please wait before trying again.'}), {
+      status: 429, headers: {'Retry-After': '17'},
+    }),
+  }), {status: 429, retryAfter: 17});
+});
+
 test('logged-out recovery configuration request sends no JWT', async () => {
   const response = await requestApi('/auth/password-recovery', {fetchImpl: async (url, options) => {
     assert.equal(url, '/api/auth/password-recovery');

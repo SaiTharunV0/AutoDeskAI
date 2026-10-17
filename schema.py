@@ -12,6 +12,7 @@ class Intent(str, Enum):
     CHAT = "CHAT"
     CLARIFICATION = "CLARIFICATION"
     UNSUPPORTED = "UNSUPPORTED"
+    REQUEST_STATUS = "REQUEST_STATUS"
 
 
 class AgentResponse(BaseModel):

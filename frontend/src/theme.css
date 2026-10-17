@@ -163,9 +163,21 @@ input:hover, select:hover, textarea:hover { border-color: #9dbdb3; }
 .request:hover, .endpointCard:hover { background: #eef7f0; border-color: #91c6a8; }
 .request { color: var(--ink); }
 .requestArticle { border-color: var(--line); background: #fff; box-shadow: none; padding: 14px; }
-.requestArticle p { color: #465f59; }
-.requestArticle > button:not(.request), .policy button, .deviceToggle, .textButton { background: #fff; border-color: #bad8c4; color: var(--teal-dark); }
-.requestArticle > button:not(.request):hover, .policy button:hover, .deviceToggle:hover, .textButton:hover { background: #ecf6ee; border-color: #8ec1a5; }
+.requestArticle { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; padding: 14px 16px; }
+.requestSummary { grid-column: 1 / -1; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 0 0 11px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); text-align: left; }
+.requestSummary:hover { background: transparent; border-color: var(--line); }
+.requestSummary:focus-visible { border-radius: 7px; }
+.requestSummary .reqIcon { width: 34px; height: 34px; border-radius: 11px; background: #e9f4ed; color: var(--teal); }
+.requestIdentity { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.requestIdentity b { color: var(--ink); font-size: 15px; line-height: 1.35; }
+.requestIdentity .status { margin: 0; white-space: nowrap; }
+.requestSummary time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.requestArticle p { grid-column: 1; margin: 0; color: #465f59; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.requestArticle:not(.hasAction) p { grid-column: 1 / -1; }
+.requestActions { grid-column: 2; grid-row: 2; display: flex; justify-content: flex-end; }
+.requestAction, .policy button, .deviceToggle, .textButton { background: #fff; border: 1px solid #bad8c4; color: var(--teal-dark); }
+.requestAction { min-height: 36px; border-radius: 9px; padding: 7px 11px; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.requestAction:hover, .policy button:hover, .deviceToggle:hover, .textButton:hover { background: #ecf6ee; border-color: #8ec1a5; }
 .knowledge p, .profile p, .device small { color: var(--muted); }
 .role { background: #e9f4ec; color: var(--teal-dark); }
 .knowledgePage { display: grid; gap: 18px; }
@@ -265,6 +277,8 @@ input:hover, select:hover, textarea:hover { border-color: #9dbdb3; }
   .knowledgeRelated { grid-template-columns: 1fr; }
   .dashboardHero { flex-wrap: wrap; }
   .heroDate { max-width: 100%; white-space: normal; }
+  .requestArticle { gap: 9px 14px; padding: 12px; }
+  .requestActions { grid-column: 1 / -1; grid-row: auto; justify-content: flex-start; padding-left: 46px; }
 }
 @media (max-width: 500px) {
   .authHero { padding: 25px 18px 28px; }
@@ -276,6 +290,11 @@ input:hover, select:hover, textarea:hover { border-color: #9dbdb3; }
   .dashboardHero { padding: 26px 22px; }
   .assistant { padding: 16px; }
   .pageCard { padding: 20px 16px; }
+  .requestArticle { grid-template-columns: minmax(0, 1fr); }
+  .requestSummary { grid-template-columns: 34px minmax(0, 1fr); gap: 9px; }
+  .requestSummary time { grid-column: 2; grid-row: 2; }
+  .requestActions { grid-column: 1; padding-left: 43px; }
+  .requestAction { white-space: normal; text-align: left; }
   .managerStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .managerMetric { min-height: 100px; }
   .managerMetric.connectedMetric { grid-column: 1 / -1; }
