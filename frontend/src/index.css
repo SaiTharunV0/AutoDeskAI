@@ -237,6 +237,7 @@ input::placeholder { color: #8498ad; }
   display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
   background: #edf4ff; color: #1976ed;
 }
+.bot img { display: block; width: 30px; height: 30px; object-fit: contain; border-radius: 7px; }
 .title b { display: block; }
 .title small { color: #607990; }
 .online { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; color: #147c4c; font-weight: 700; }
@@ -270,6 +271,7 @@ input::placeholder { color: #8498ad; }
 .bubble button { display: block; margin-top: 10px; padding: 8px 10px; border: 1px solid #a8cafa; border-radius: 8px; background: #fff; color: #175ca6; font-size: 12px; font-weight: 700; }
 .mini { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; }
 .mini.bot { background: #edf4ff; color: #1976ed; }
+.mini.bot img { display: block; width: 22px; height: 22px; object-fit: contain; border-radius: 6px; }
 .mini.person { background: #eef5ff; color: #24477a; }
 .clarify {
   display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
@@ -415,13 +417,17 @@ input::placeholder { color: #8498ad; }
   background: #f8fbff; text-align: center; line-height: 1.5;
 }
 .ticketTable { display: flex; flex-direction: column; gap: 8px; }
+.managerTicketPanel .ticketTable { overflow-x: auto; padding-bottom: 4px; }
 .ticketHead, .ticketRow {
   display: grid; grid-template-columns: 70px 1.2fr 1fr 2.4fr 1fr 1fr; gap: 12px; align-items: center;
 }
+.managerTicketPanel .ticketHead, .managerTicketPanel .ticketRow { min-width: 1040px; grid-template-columns: minmax(130px, .9fr) minmax(160px, 1.25fr) minmax(145px, 1.1fr) minmax(210px, 1.8fr) minmax(150px, 1fr) minmax(145px, 1fr); }
 .ticketHead { padding: 0 8px; color: #6a7f98; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
-.ticketRow { padding: 12px 10px; background: #f8fbff; border: 1px solid #e2edf8; border-radius: 10px; }
+.ticketRow { padding: 14px 12px; background: #fff; border: 1px solid #dce8e3; border-radius: 11px; box-shadow: 0 2px 8px rgba(18, 69, 61, .035); }
 .ticketRow span:not(.status) { font-size: 13px; line-height: 1.4; color: #183758; }
 .ticketReason { display: block; word-break: break-word; }
+.navBadge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: #c84a35; color: #fff; font-size: 11px; font-weight: 800; }
+.approvalNotice { display: flex; align-items: center; gap: 9px; width: 100%; margin: 0 0 14px; padding: 12px 14px; border: 1px solid #eed7a4; border-radius: 10px; background: #fff7e5; color: #78520a; text-align: left; font-weight: 700; cursor: pointer; }
 .managerDashboard { display: grid; gap: 18px; }
 .managerDashboard .intro { margin: 6px 0 0; }
 .managerDashboard .intro h1 { font-size: 30px; }

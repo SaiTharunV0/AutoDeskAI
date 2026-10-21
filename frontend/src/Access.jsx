@@ -67,17 +67,17 @@ export function EmployeeAccess({api}) {
   </section>;
 }
 
-export function AdminAccess({api}) {
+export function AdminAccess({api, onPendingChange}) {
   const [apps, setApps] = useState([]), [requests, setRequests] = useState([]);
   const [revisions, setRevisions] = useState([]);
   const [form, setForm] = useState(defaultApplication), [isNew, setIsNew] = useState(true);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
-  async function load() {const [catalog, history] = await Promise.all([api('/admin/access/applications'), api('/admin/access/requests')]);setApps(catalog);setRequests(history)}
+  async function load() {const [catalog, history] = await Promise.all([api('/admin/access/applications'), api('/admin/access/requests')]);setApps(catalog);setRequests(history);onPendingChange?.(pendingAccessRequests(history))}
   useEffect(() => {let live = true;Promise.all([api('/admin/access/applications'), api('/admin/access/requests')])
-    .then(([catalog, history]) => {if (live) {setApps(catalog);setRequests(history)}})
+    .then(([catalog, history]) => {if (live) {setApps(catalog);setRequests(history);onPendingChange?.(pendingAccessRequests(history))}})
     .catch(err => {if (live) setError(err.message)})
-    .finally(() => {if (live) setLoading(false)});return () => {live = false}}, [api]);
+    .finally(() => {if (live) setLoading(false)});return () => {live = false}}, [api, onPendingChange]);
   const update = (key, value) => setForm(current => ({...current, [key]: value}));
   function edit(item) {setForm(item);setIsNew(false);setNotice('');setError('');
     api(`/admin/access/applications/${item.key}/revisions`).then(setRevisions).catch(err => setError(err.message))}
@@ -119,7 +119,7 @@ export function AdminAccess({api}) {
         <label>Allowed groups (trusted directory source required)<input value={form.allowed_groups.join(', ')} onChange={event => update('allowed_groups', split(event.target.value))}/></label>
         <label>Default duration (days)<input type="number" min="1" max="365" value={form.default_duration_days} onChange={event => update('default_duration_days', Number(event.target.value))}/></label>
         <label>Maximum duration (days)<input type="number" min="1" max="365" value={form.max_duration_days} onChange={event => update('max_duration_days', Number(event.target.value))}/></label>
-        <label>Approval mode<select value={form.approval_mode} onChange={event => update('approval_mode', event.target.value)}><option>AUTOMATIC</option><option>CONDITIONAL</option><option>ADMIN_ONLY</option></select></label>
+        <label>Who approves access?<select value={form.approval_mode} onChange={event => update('approval_mode', event.target.value)}><option value="AUTOMATIC">Bot approves eligible requests</option><option value="CONDITIONAL">Bot approves only when conditions pass</option><option value="ADMIN_ONLY">Administrator approves every request</option></select></label>
         <label>Fallback<select value={form.fallback} onChange={event => update('fallback', event.target.value)}><option>REQUIRE_ADMIN_APPROVAL</option><option>DENY</option></select></label>
         <label>Minimum justification characters<input type="number" min="0" max="500" value={form.conditions.min_justification_length ?? ''} onChange={event => setForm(current => ({...current, conditions: {...current.conditions, min_justification_length: event.target.value === '' ? undefined : Number(event.target.value)}}))}/></label>
         <label>Conditional maximum duration<input type="number" min="1" max="365" value={form.conditions.max_duration_days ?? ''} onChange={event => setForm(current => ({...current, conditions: {...current.conditions, max_duration_days: event.target.value === '' ? undefined : Number(event.target.value)}}))}/></label>
@@ -129,7 +129,8 @@ export function AdminAccess({api}) {
         <label>Risk<select value={form.risk} onChange={event => update('risk', event.target.value)}><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select></label>
         <label>Provisioning provider<select value={form.provider_type} onChange={event => update('provider_type', event.target.value)}><option value="MOCK">Mock / simulated</option><option value="NONE">None</option></select></label>
         <label>Configuration reference (no secrets)<input value={form.config_ref} onChange={event => update('config_ref', event.target.value)}/></label>
-        <label className="accessCheck"><input type="checkbox" checked={form.auto_allowed} onChange={event => update('auto_allowed', event.target.checked)}/>Allow automatic approval when all checks pass</label>
+        <label className="accessCheck"><input type="checkbox" checked={form.auto_allowed} onChange={event => update('auto_allowed', event.target.checked)}/>Allow the bot to approve eligible requests</label>
+        <p className="accessPolicyHelp">Bot approval still checks the role, risk, request duration and configured conditions. High risk, human only roles, or failed and unverified checks follow the fallback policy.</p>
         <label className="accessCheck"><input type="checkbox" checked={form.enabled} onChange={event => update('enabled', event.target.checked)}/>Enabled</label>
         <button className="primary" disabled={busy}>{busy ? 'Saving...' : 'Save application and policy'}</button></form>
       {!isNew && <details><summary>Policy revisions · {revisions.length}</summary>{revisions.map(row => <p key={row.version}>Version {row.version} · Administrator {row.actor_id || 'System'} · {new Date(row.created_at + 'Z').toLocaleString()} · {row.snapshot.approval_mode}</p>)}</details>}

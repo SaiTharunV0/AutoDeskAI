@@ -20,4 +20,5 @@
 .accessActions { display: flex; gap: 8px; }
 .accessActions button { padding: 8px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); cursor: pointer; }
 .accessNotice { padding: 12px; border-radius: 8px; background: var(--soft); color: var(--teal); }
+.accessPolicyHelp { grid-column: 1 / -1; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--muted); font-size: 13px; line-height: 1.5; }
 @media (max-width: 560px) { .accessHistoryRow { grid-template-columns: 1fr; } }
