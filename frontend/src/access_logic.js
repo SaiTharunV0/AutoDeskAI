@@ -22,7 +22,8 @@ export function buildPolicyPayload(form) {
 
 export function buildDecisionPayload(decision, reason) {
   const trimmed = reason.trim();
-  if (!['APPROVE', 'REJECT'].includes(decision) || trimmed.length < 5)
-    throw new Error('Enter an approval or rejection reason of at least 5 characters.');
+  if (!['APPROVE', 'REJECT'].includes(decision)) throw new Error('Choose approve or reject.');
+  if (decision === 'REJECT' && trimmed.length < 5)
+    throw new Error('Enter a rejection reason of at least 5 characters.');
   return {decision, reason: trimmed};
 }

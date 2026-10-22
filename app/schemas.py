@@ -219,7 +219,10 @@ class AccessSubmit(Input):
 
 class AccessDecisionIn(Input):
     decision: Literal['APPROVE', 'REJECT']
-    reason: str = Field(min_length=5, max_length=200)
+    reason: str = Field(default='', max_length=200)
+
+class TicketClosureSettingIn(Input):
+    mode: Literal['AUTOMATIC', 'ADMIN_CONFIRMATION']
 
 class AccessOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

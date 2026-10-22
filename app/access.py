@@ -98,6 +98,12 @@ def submit_access(db, user, application, requested_role, justification, duration
                 or existing.access.duration_days != duration_days):
             raise HTTPException(409, 'Idempotency key was reused with different request details')
         return existing.access
+    if not existing_request:
+        open_ticket = db.scalar(select(HelpdeskRequest).where(
+            HelpdeskRequest.user_id == user.id, HelpdeskRequest.status != 'CLOSED'
+        ).order_by(HelpdeskRequest.id).limit(1))
+        if open_ticket:
+            raise HTTPException(409, f'Close ticket #{open_ticket.id} before sending another request.')
     row = db.get(ApplicationPolicy, application.lower().strip())
     if not row or not row.enabled:
         raise HTTPException(404, 'Application is unavailable')
@@ -163,7 +169,7 @@ def decide_access(db, access_id, admin, decision, reason):
     access.approver_id = admin.id
     access.decision_at = now()
     access.decision_reason = reason.strip()
-    access.request.message = (f'Approved by an administrator. {reason.strip()} Real provisioning is required.'
+    access.request.message = (f'Approved by an administrator. Real provisioning is required.'
                               if decision == 'APPROVE' else f'Rejected by an administrator. {reason.strip()}')[:500]
     if decision == 'APPROVE' and policy:
         attempt_provision(db, policy, access)

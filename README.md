@@ -12,6 +12,21 @@ AutoDeskAI is an IT helpdesk prototype with a FastAPI backend, PostgreSQL databa
 - VS Code installation is simulated by an enrolled, online endpoint agent. Application access uses a configurable backend approval policy and records simulated provisioning; it does not grant an external account.
 - Administrators can review requests, users, devices, audit history, and application catalog and approval policies. They can decide pending access requests, enroll and disable endpoint devices.
 
+## Research foundation and scope
+
+This project is based on Mani et al., *Hi, how can I help you?: Automating enterprise IT support help desks* (AAAI, 2018). AutoDeskAI applies the paper's help desk workflow ideas to a deliberately small, policy controlled prototype. It is not a full reproduction of the paper's QA platform.
+
+| Paper concept | AutoDeskAI implementation | Current boundary |
+| --- | --- | --- |
+| Orchestrate multiple IT support components | The backend routes supported password, software, and application access requests to their respective workflows. The model classifies sanitized intent; backend code validates and performs the action. | Only the workflows described in this README are supported. |
+| Resolve ambiguity through clarification | Ambiguous or incomplete requests can enter `NEEDS_CLARIFICATION`; a follow-up is tied to that request and validated before it continues. | Clarification uses a small set of supported workflow and catalog entities, not the paper's learned QA corpus. |
+| Keep a human in the loop | Application policies can require administrator approval; high risk and human only roles cannot be auto approved. Users initiate the request, and password completion remains with the user and Microsoft. | There is no general live support handoff or SME authoring queue. |
+| Automate suitable resolution steps | Approved software requests can be dispatched to an enrolled endpoint agent; access decisions can use configured automatic approval rules. | Endpoint installation and access provisioning are simulations. AutoDeskAI does not claim a real change succeeded unless a configured provider can verify it. |
+| Learn from support interactions | Requests and administrator decisions are audited for operational review. | Audit history is not used to retrain a classifier or automatically create knowledge answers. Continuous learning is not implemented. |
+| Ingest enterprise knowledge and answer questions from it | The application catalog and fixed workflow guidance provide limited, controlled support information. | There is no ingestion pipeline for documents, tickets, images, audio, or video, and no retrieval augmented QA system. General questions are out of scope. |
+
+The paper's key design principles for this prototype are orchestration, explicit clarification, backend-owned decisions, appropriate human approval, and truthful reporting of action outcomes. The intentionally unimplemented research components above should be treated as future scope, not as existing features. Any expansion to knowledge ingestion or learned answers should add source tracking, access controls, and human review before answers or policies affect users.
+
 ## Requirements
 
 Python 3.11+, PostgreSQL, Node.js 20.19+ or 22.12+, and an accessible Ollama model. `requirements.txt` contains runtime Python packages; `requirements-dev.txt` adds pytest for local and CI tests. The frontend packages are in `frontend/package.json`.

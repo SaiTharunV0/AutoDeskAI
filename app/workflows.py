@@ -57,6 +57,13 @@ def create_workflow(db, user, payload):
                            HelpdeskRequest.idempotency_key == payload.idempotency_key))
     if existing:
         return existing
+    open_ticket = db.scalar(select(HelpdeskRequest).where(
+        HelpdeskRequest.user_id == user.id, HelpdeskRequest.status != 'CLOSED'
+    ).order_by(HelpdeskRequest.id).limit(1))
+    continuing_clarification = (open_ticket and open_ticket.status == 'NEEDS_CLARIFICATION'
+                                and payload.previous_request_id == open_ticket.id)
+    if open_ticket and not continuing_clarification:
+        raise HTTPException(409, f'Close ticket #{open_ticket.id} before sending another chat message.')
     check_chat_rate(db, user.id, payload.message)
     try:
         safe = safe_message(payload.message)
@@ -107,6 +114,11 @@ def create_workflow(db, user, payload):
                               original_message=safe[:200], idempotency_key=payload.idempotency_key)
     db.add(request)
     db.flush()
+    if previous:
+        prior.status = 'CLOSED'
+        prior.message = (prior.message + f' Clarification received; follow-up ticket #{request.id} opened.')[:500]
+        audit(db, user.id, 'CLARIFICATION_FOLLOWUP_CREATED', 'request', prior.id, 'CLOSED',
+              f'Follow-up ticket {request.id}')
     if result.intent in (Intent.PASSWORD_CHANGE, Intent.PASSWORD_RESET):
         request.status = "AWAITING_USER_ACTION"
         request.message = ("Continue at Microsoft My Account to change your organization password. "

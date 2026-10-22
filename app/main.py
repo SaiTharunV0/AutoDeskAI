@@ -40,6 +40,8 @@ async def lifespan(app):
             if not db.get(ApplicationPolicy, key):
                 db.add(ApplicationPolicy(key=key, display_name=APPLICATIONS[key] + ' (example)',
                     description='Example catalog entry. No live provisioning integration is configured.'))
+        if not db.get(AppSetting, 'ticket_closure_mode'):
+            db.add(AppSetting(key='ticket_closure_mode', value='AUTOMATIC'))
         db.flush()
         for row in db.scalars(select(ApplicationPolicy)):
             recorded = db.scalar(select(AccessPolicyRevision.id).where(
@@ -222,6 +224,24 @@ def request_detail(request_id: int, user=Depends(get_current_user), db: Session 
     expire_tasks(db)
     return owned_request(db, request_id, user)
 
+@app.post('/requests/{request_id}/close', response_model=RequestOut, tags=['Requests'])
+def employee_close_ticket(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    request = db.scalar(select(HelpdeskRequest).where(
+        HelpdeskRequest.id == request_id, HelpdeskRequest.user_id == user.id
+    ).with_for_update())
+    if not request:
+        raise HTTPException(404, 'Request not found')
+    closable = {'COMPLETED', 'FAILED', 'REJECTED', 'AWAITING_USER_ACTION',
+                'NEEDS_CLARIFICATION', 'APPROVED_PROVISIONING_REQUIRED'}
+    if request.status not in closable:
+        raise HTTPException(409, 'This ticket is still being handled and cannot be closed yet')
+    previous_status = request.status
+    request.status = 'CLOSED'
+    request.message = (request.message + ' Employee marked this ticket closed.')[:500]
+    audit(db, user.id, 'TICKET_CLOSED_BY_EMPLOYEE', 'request', request.id, 'CLOSED', previous_status)
+    db.commit()
+    return request
+
 @app.get("/requests/{request_id}/history", response_model=list[AuditOut], tags=["Requests"])
 def history(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
     owned_request(db, request_id, user)
@@ -354,12 +374,49 @@ def task_result(task_id: int, payload: ResultIn, device=Depends(current_device),
         raise HTTPException(409, "Task already finalized")
     if task.status != "PROCESSING":
         raise HTTPException(409, "Task was not dispatched")
-    task.status = task.request.status = status
-    task.result = task.request.message = result
+    task.status = status
+    closure_setting = db.get(AppSetting, 'ticket_closure_mode')
+    request_status = ('AWAITING_ADMIN_CLOSE' if payload.success and closure_setting
+                      and closure_setting.value == 'ADMIN_CONFIRMATION' else status)
+    task.request.status = request_status
+    task.result = result
+    task.request.message = (result + ' Waiting for an administrator to close this ticket.'
+                            if request_status == 'AWAITING_ADMIN_CLOSE' else result)
     task.completed_at = now()
-    audit(db, task.request.user_id, "SOFTWARE_INSTALL_" + status, "request", task.request_id, status, "Simulation")
+    audit(db, task.request.user_id, "SOFTWARE_INSTALL_" + status, "request", task.request_id, request_status, "Simulation")
     db.commit()
     return task
+
+@app.get('/admin/settings/ticket-closure', tags=['Admin'])
+def get_ticket_closure_setting(user=Depends(require_admin), db: Session = Depends(get_db)):
+    setting = db.get(AppSetting, 'ticket_closure_mode')
+    return {'mode': setting.value if setting else 'AUTOMATIC'}
+
+@app.put('/admin/settings/ticket-closure', tags=['Admin'])
+def update_ticket_closure_setting(payload: TicketClosureSettingIn, user=Depends(require_admin),
+                                  db: Session = Depends(get_db)):
+    setting = db.get(AppSetting, 'ticket_closure_mode')
+    if not setting:
+        setting = AppSetting(key='ticket_closure_mode', value=payload.mode)
+        db.add(setting)
+    else:
+        setting.value = payload.mode
+    audit(db, user.id, 'TICKET_CLOSURE_POLICY_UPDATED', 'settings', None, 'COMPLETED', payload.mode)
+    db.commit()
+    return {'mode': setting.value}
+
+@app.post('/admin/requests/{request_id}/close', response_model=RequestOut, tags=['Admin'])
+def close_ticket(request_id: int, user=Depends(require_admin), db: Session = Depends(get_db)):
+    request = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.id == request_id).with_for_update())
+    if not request:
+        raise HTTPException(404, 'Request not found')
+    if request.status != 'AWAITING_ADMIN_CLOSE' or request.intent != 'SOFTWARE_INSTALL':
+        raise HTTPException(409, 'This ticket is not awaiting administrator closure')
+    request.status = 'COMPLETED'
+    request.message = 'Ticket closed by an administrator after confirming the reported installation result.'
+    audit(db, user.id, 'TICKET_CLOSED_BY_ADMIN', 'request', request.id, 'COMPLETED')
+    db.commit()
+    return request
 
 @app.get("/admin/devices", response_model=list[DeviceOut], tags=["Admin"])
 def admin_devices(user=Depends(require_admin), db: Session = Depends(get_db)):
@@ -468,6 +525,8 @@ def pending_access_requests(user=Depends(require_admin), db: Session = Depends(g
 @app.post('/admin/access/requests/{access_id}/decision', response_model=AccessOut, tags=['Admin application access'])
 def admin_access_decision(access_id: int, payload: AccessDecisionIn, user=Depends(require_admin),
                           db: Session = Depends(get_db)):
+    if payload.decision == 'REJECT' and len(payload.reason.strip()) < 5:
+        raise HTTPException(422, 'Enter a rejection reason of at least 5 characters')
     return decide_access(db, access_id, user, payload.decision, payload.reason)
 
 @app.post('/admin/access/requests/{access_id}/provisioning/retry', response_model=AccessOut,

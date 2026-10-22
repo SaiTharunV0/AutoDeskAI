@@ -148,3 +148,8 @@ class ChatRateLimitBucket(Base):
     window_start: Mapped[datetime] = mapped_column(primary_key=True)
     count: Mapped[int] = mapped_column(default=0)
     updated_at: Mapped[datetime] = mapped_column(default=now, onupdate=now)
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(String(120))

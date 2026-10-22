@@ -5,6 +5,7 @@ import './access.css';
 
 const split = value => value.split(',').map(item => item.trim()).filter(Boolean);
 const parseEvaluation = value => {try {return JSON.parse(value)} catch {return {}}};
+const employeeClosable = new Set(['COMPLETED', 'FAILED', 'REJECTED', 'AWAITING_USER_ACTION', 'NEEDS_CLARIFICATION', 'APPROVED_PROVISIONING_REQUIRED']);
 const defaultApplication = {
   key: '', display_name: '', description: '', enabled: true, required_role: 'employee',
   requestable_roles: ['viewer'], allowed_groups: [], default_duration_days: 30,
@@ -34,24 +35,29 @@ function AccessHistory({rows, admin = false, onRetry}) {
 }
 
 export function EmployeeAccess({api}) {
-  const [applications, setApplications] = useState([]), [requests, setRequests] = useState([]);
+  const [applications, setApplications] = useState([]), [requests, setRequests] = useState([]), [tickets, setTickets] = useState([]);
   const [selected, setSelected] = useState(''), [role, setRole] = useState(''), [days, setDays] = useState(30);
   const [justification, setJustification] = useState(''), [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const current = applications.find(item => item.key === selected);
-  useEffect(() => {let live = true; Promise.all([api('/access/applications'), api('/access/requests')])
-    .then(([apps, rows]) => {if (live) {setApplications(apps);setRequests(rows);}})
+  useEffect(() => {let live = true; Promise.all([api('/access/applications'), api('/access/requests'), api('/requests')])
+    .then(([apps, rows, allTickets]) => {if (live) {setApplications(apps);setRequests(rows);setTickets(allTickets);}})
     .catch(err => {if (live) setError(err.message)})
     .finally(() => {if (live) setLoading(false)}); return () => {live = false};}, [api]);
+  const openTicket = [...tickets].reverse().find(row => row.status !== 'CLOSED');
+  async function closeTicket() {if (!openTicket || !employeeClosable.has(openTicket.status)) return;setBusy(true);setError('');setNotice('');
+    try {await api(`/requests/${openTicket.id}/close`, {method: 'POST'});setTickets(await api('/requests'));setNotice(`Ticket #${openTicket.id} closed. You can submit another request.`)}
+    catch (err) {setError(err.message)} finally {setBusy(false)}}
   function choose(key) {const item = applications.find(app => app.key === key);setSelected(key);
     setRole(item?.requestable_roles[0] || '');setDays(item?.default_duration_days || 30);setJustification('');}
   async function submit(event) {event.preventDefault();if (!current || busy) return;setBusy(true);setError('');setNotice('');
     try {const result = await api('/access/requests', {method: 'POST', body: JSON.stringify(
       buildAccessPayload(current, role, justification, days, crypto.randomUUID()))});
-      setRequests(await api('/access/requests'));setNotice(`Request ${result.request_id} submitted: ${label(result.status)}.`);}
+      setRequests(await api('/access/requests'));setTickets(await api('/requests'));setNotice(`Request ${result.request_id} submitted: ${label(result.status)}.`);}
     catch (err) {setError(err.message)} finally {setBusy(false)}}
   return <section className="pageCard accessPage"><h1>Application Access</h1><p>Request an approved application and follow its decision and provisioning status.</p>
     {error && <div className="error" role="alert">{error}</div>}{notice && <div className="accessNotice" role="status">{notice}</div>}
+    {openTicket&&<div className="accessTicketGate" role="status"><span><b>Close ticket #{openTicket.id} before submitting another request</b><small>{openTicket.status==='AWAITING_ADMIN_CLOSE'?'An administrator must close this ticket first.':openTicket.status==='APPROVED_PROVISIONING_REQUIRED'?'Approval is recorded, but application access has not been verified.':openTicket.status==='AWAITING_USER_ACTION'?'Close this only after completing the Microsoft step; AutoDeskAI cannot verify the outcome.':employeeClosable.has(openTicket.status)?'This ticket is ready to close.':`Current status: ${label(openTicket.status)}. You can close it when it is ready.`}</small></span>{employeeClosable.has(openTicket.status)&&<button type="button" disabled={busy} onClick={closeTicket}>Close ticket</button>}</div>}
     {loading ? <div className="empty">Loading applications...</div> : <>
       <div className="accessCatalog">{applications.map(item => <button type="button" key={item.key} className={'accessApp ' + (selected === item.key ? 'selected' : '')} onClick={() => choose(item.key)}>
         <b>{item.display_name}</b><small>{item.description}</small><span>{item.requestable_roles.join(', ')} · Up to {item.max_duration_days} days</span>
@@ -61,7 +67,7 @@ export function EmployeeAccess({api}) {
         <label>Access duration (days)<input type="number" min="1" max={current.max_duration_days} required value={days} onChange={event => setDays(event.target.value)}/></label>
         <label>Business justification<textarea maxLength="500" value={justification} onChange={event => setJustification(event.target.value)} placeholder="Explain why you need this access"/></label>
         <p>Approval: {label(current.approval_mode)} · Provider: {current.provider_type === 'MOCK' ? 'Simulation only' : 'No provisioning configured'}</p>
-        <button className="primary" type="submit" disabled={busy}>{busy ? 'Submitting...' : 'Submit access request'}</button></form>}
+        <button className="primary" type="submit" disabled={busy||Boolean(openTicket)}>{busy ? 'Submitting...' : 'Submit access request'}</button></form>}
       <div className="sectionHead"><h2>My access requests</h2><button type="button" className="secondary" onClick={() => api('/access/requests').then(setRequests).catch(err => setError(err.message))}>Refresh status</button></div><AccessHistory rows={requests}/>
     </>}
   </section>;
@@ -70,7 +76,7 @@ export function EmployeeAccess({api}) {
 export function AdminAccess({api, onPendingChange}) {
   const [apps, setApps] = useState([]), [requests, setRequests] = useState([]);
   const [revisions, setRevisions] = useState([]);
-  const [form, setForm] = useState(defaultApplication), [isNew, setIsNew] = useState(true);
+  const [form, setForm] = useState(defaultApplication), [isNew, setIsNew] = useState(true), [editorOpen, setEditorOpen] = useState(false);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
   async function load() {const [catalog, history] = await Promise.all([api('/admin/access/applications'), api('/admin/access/requests')]);setApps(catalog);setRequests(history);onPendingChange?.(pendingAccessRequests(history))}
@@ -79,18 +85,18 @@ export function AdminAccess({api, onPendingChange}) {
     .catch(err => {if (live) setError(err.message)})
     .finally(() => {if (live) setLoading(false)});return () => {live = false}}, [api, onPendingChange]);
   const update = (key, value) => setForm(current => ({...current, [key]: value}));
-  function edit(item) {setForm(item);setIsNew(false);setNotice('');setError('');
+  function edit(item) {setForm(item);setIsNew(false);setEditorOpen(true);setNotice('');setError('');
     api(`/admin/access/applications/${item.key}/revisions`).then(setRevisions).catch(err => setError(err.message))}
   async function save(event) {event.preventDefault();if (busy) return;setBusy(true);setError('');setNotice('');
     try {const payload = buildPolicyPayload(form);
       const saved = await api(isNew ? '/admin/access/applications' : `/admin/access/applications/${form.key}`,
         {method: isNew ? 'POST' : 'PUT', body: JSON.stringify(payload)});
-      await load();setForm(saved);setIsNew(false);
+      await load();setForm(saved);setIsNew(false);setEditorOpen(true);
       setRevisions(await api(`/admin/access/applications/${saved.key}/revisions`));
       setNotice(`${form.display_name} saved.`);}
     catch (err) {setError(err.message)} finally {setBusy(false)}}
-  async function decide(row, decision) {const reason = window.prompt(`${decision === 'APPROVE' ? 'Approval' : 'Rejection'} reason for ${row.application}:`);
-    if (reason === null) return;
+  async function decide(row, decision) {const reason = decision === 'REJECT' ? window.prompt(`Reason for rejecting ${row.application}:`) : '';
+    if (decision === 'REJECT' && reason === null) return;
     setBusy(true);setError('');setNotice('');try {await api(`/admin/access/requests/${row.id}/decision`,
       {method: 'POST', body: JSON.stringify(buildDecisionPayload(decision, reason))});await load();setNotice(`Request ${row.request_id} ${decision.toLowerCase()}d.`)}
     catch (err) {setError(err.message)} finally {setBusy(false)}}
@@ -108,18 +114,22 @@ export function AdminAccess({api, onPendingChange}) {
       </article>)}</div>}</PaginatedRows> : <div className="empty">No requests are waiting for approval.</div>}
       <h2>Application catalog</h2><div className="accessCatalog">{apps.map(item => <button type="button" className={'accessApp ' + (!isNew && form.key === item.key ? 'selected' : '')} key={item.key} onClick={() => edit(item)}>
         <b>{item.display_name}</b><small>{item.key} · v{item.version} · {item.enabled ? 'Enabled' : 'Disabled'}</small><span>{label(item.approval_mode)} · {item.provider_type}</span></button>)}</div>
-      <button type="button" className="secondary" onClick={() => {setForm(defaultApplication);setIsNew(true);setRevisions([])}}>Add application</button>
-      <form className="accessForm accessEditor" onSubmit={save}><h2>{isNew ? 'New application' : `Edit ${form.display_name} · policy v${form.version}`}</h2>
+      <button type="button" className="primary addApplicationButton" onClick={() => {setForm(defaultApplication);setIsNew(true);setEditorOpen(true);setRevisions([]);setError('');setNotice('')}}>＋ Add application</button>
+      {editorOpen && <form className="accessForm accessEditor" onSubmit={save}>
+        <div className="accessEditorHeading"><div><span className="accessEyebrow">{isNew ? 'NEW CATALOG ENTRY' : `APPLICATION · POLICY V${form.version}`}</span><h2>{isNew ? 'Add an application' : `Edit ${form.display_name}`}</h2><p>Set the basics first. Optional policy controls are grouped below.</p></div><button type="button" className="accessClose" onClick={() => setEditorOpen(false)}>Close</button></div>
         <label>Application ID<input value={form.key} disabled={!isNew} required pattern="[a-z][a-z0-9_-]+" onChange={event => update('key', event.target.value)}/></label>
         <label>Display name<input value={form.display_name} required onChange={event => update('display_name', event.target.value)}/></label>
         <label>Description<textarea value={form.description} onChange={event => update('description', event.target.value)}/></label>
-        <label>Who may request<select value={form.required_role} onChange={event => update('required_role', event.target.value)}><option value="employee">Employees and admins</option><option value="admin">Admins only</option></select></label>
         <label>Requestable roles (comma separated)<input value={form.requestable_roles.join(', ')} required onChange={event => update('requestable_roles', split(event.target.value))}/></label>
-        <label>Mandatory human approval roles<input value={form.human_roles.join(', ')} onChange={event => update('human_roles', split(event.target.value))}/></label>
-        <label>Allowed groups (trusted directory source required)<input value={form.allowed_groups.join(', ')} onChange={event => update('allowed_groups', split(event.target.value))}/></label>
+        <label>Who approves access?<select value={form.approval_mode} onChange={event => update('approval_mode', event.target.value)}><option value="AUTOMATIC">Bot approves eligible requests</option><option value="CONDITIONAL">Bot approves only when conditions pass</option><option value="ADMIN_ONLY">Administrator approves every request</option></select></label>
+        <label className="accessCheck"><input type="checkbox" checked={form.auto_allowed} onChange={event => update('auto_allowed', event.target.checked)}/>Allow the bot to approve eligible requests</label>
+        <label className="accessCheck"><input type="checkbox" checked={form.enabled} onChange={event => update('enabled', event.target.checked)}/>Application available for requests</label>
+        <details className="accessAdvanced"><summary>Advanced policy settings</summary><div className="accessAdvancedGrid">
+        <label>Who may request<select value={form.required_role} onChange={event => update('required_role', event.target.value)}><option value="employee">Employees and admins</option><option value="admin">Admins only</option></select></label>
         <label>Default duration (days)<input type="number" min="1" max="365" value={form.default_duration_days} onChange={event => update('default_duration_days', Number(event.target.value))}/></label>
         <label>Maximum duration (days)<input type="number" min="1" max="365" value={form.max_duration_days} onChange={event => update('max_duration_days', Number(event.target.value))}/></label>
-        <label>Who approves access?<select value={form.approval_mode} onChange={event => update('approval_mode', event.target.value)}><option value="AUTOMATIC">Bot approves eligible requests</option><option value="CONDITIONAL">Bot approves only when conditions pass</option><option value="ADMIN_ONLY">Administrator approves every request</option></select></label>
+        <label>Mandatory human approval roles<input value={form.human_roles.join(', ')} onChange={event => update('human_roles', split(event.target.value))}/></label>
+        <label>Allowed groups (trusted directory source required)<input value={form.allowed_groups.join(', ')} onChange={event => update('allowed_groups', split(event.target.value))}/></label>
         <label>Fallback<select value={form.fallback} onChange={event => update('fallback', event.target.value)}><option>REQUIRE_ADMIN_APPROVAL</option><option>DENY</option></select></label>
         <label>Minimum justification characters<input type="number" min="0" max="500" value={form.conditions.min_justification_length ?? ''} onChange={event => setForm(current => ({...current, conditions: {...current.conditions, min_justification_length: event.target.value === '' ? undefined : Number(event.target.value)}}))}/></label>
         <label>Conditional maximum duration<input type="number" min="1" max="365" value={form.conditions.max_duration_days ?? ''} onChange={event => setForm(current => ({...current, conditions: {...current.conditions, max_duration_days: event.target.value === '' ? undefined : Number(event.target.value)}}))}/></label>
@@ -129,10 +139,8 @@ export function AdminAccess({api, onPendingChange}) {
         <label>Risk<select value={form.risk} onChange={event => update('risk', event.target.value)}><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select></label>
         <label>Provisioning provider<select value={form.provider_type} onChange={event => update('provider_type', event.target.value)}><option value="MOCK">Mock / simulated</option><option value="NONE">None</option></select></label>
         <label>Configuration reference (no secrets)<input value={form.config_ref} onChange={event => update('config_ref', event.target.value)}/></label>
-        <label className="accessCheck"><input type="checkbox" checked={form.auto_allowed} onChange={event => update('auto_allowed', event.target.checked)}/>Allow the bot to approve eligible requests</label>
-        <p className="accessPolicyHelp">Bot approval still checks the role, risk, request duration and configured conditions. High risk, human only roles, or failed and unverified checks follow the fallback policy.</p>
-        <label className="accessCheck"><input type="checkbox" checked={form.enabled} onChange={event => update('enabled', event.target.checked)}/>Enabled</label>
-        <button className="primary" disabled={busy}>{busy ? 'Saving...' : 'Save application and policy'}</button></form>
+        </div><p className="accessPolicyHelp">Bot approval still checks the role, risk, request duration and configured conditions. High risk, human only roles, or failed and unverified checks follow the fallback policy.</p></details>
+        <div className="accessEditorActions"><button className="primary" disabled={busy}>{busy ? 'Saving...' : isNew ? 'Add application' : 'Save changes'}</button><button type="button" className="secondary" onClick={() => setEditorOpen(false)}>Cancel</button></div></form>}
       {!isNew && <details><summary>Policy revisions · {revisions.length}</summary>{revisions.map(row => <p key={row.version}>Version {row.version} · Administrator {row.actor_id || 'System'} · {new Date(row.created_at + 'Z').toLocaleString()} · {row.snapshot.approval_mode}</p>)}</details>}
       <h2>Request history and provisioning</h2><AccessHistory rows={requests} admin onRetry={retry}/>
     </>}
