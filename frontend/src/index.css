@@ -253,9 +253,12 @@ input::placeholder { color: #8498ad; }
 .deviceBar select { margin-top: 6px; width: 260px; }
 .deviceBar small { color: #6e84a0; }
 .chatTicketGate { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; padding: 12px 14px; border: 1px solid #ecd7a4; border-radius: 11px; background: #fff8e8; color: #705114; }
-.chatTicketGate b, .chatTicketGate small { display: block; }
+.chatTicketDetails { display: grid; gap: 3px; min-width: 0; }
+.chatTicketDetails b, .chatTicketDetails small { display: block; overflow-wrap: anywhere; }
 .chatTicketGate small { margin-top: 4px; line-height: 1.45; }
-.chatTicketGate button { flex: 0 0 auto; border: 1px solid #147a68; border-radius: 8px; padding: 8px 12px; background: #e8f5f1; color: #126c5d; font-weight: 750; cursor: pointer; }
+.ticketCloseChoices { display: grid; gap: 7px; flex: 0 0 auto; }
+.chatTicketGate button { border: 1px solid #147a68; border-radius: 8px; padding: 8px 12px; background: #e8f5f1; color: #126c5d; font-weight: 750; cursor: pointer; }
+.chatTicketGate button.unresolved { border-color: #aa761b; background: #fff; color: #78520a; }
 .chatTicketGate button:disabled { opacity: .6; cursor: wait; }
 .chat {
   height: 350px; overflow: auto; display: flex; flex-direction: column; gap: 10px;
@@ -441,6 +444,7 @@ input::placeholder { color: #8498ad; }
 .ticketReason { display: block; word-break: break-word; }
 .navBadge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: #c84a35; color: #fff; font-size: 11px; font-weight: 800; }
 .approvalNotice { display: flex; align-items: center; gap: 9px; width: 100%; margin: 0 0 14px; padding: 12px 14px; border: 1px solid #eed7a4; border-radius: 10px; background: #fff7e5; color: #78520a; text-align: left; font-weight: 700; cursor: pointer; }
+.unresolvedEscalationNotice { display: flex; align-items: center; gap: 9px; width: 100%; margin: 0 0 14px; padding: 12px 14px; border: 1px solid #e5b7a7; border-radius: 10px; background: #fff0e9; color: #843c26; text-align: left; font-weight: 700; cursor: pointer; }
 .managerDashboard { display: grid; gap: 18px; }
 .managerDashboard .intro { margin: 6px 0 0; }
 .managerDashboard .intro h1 { font-size: 30px; }

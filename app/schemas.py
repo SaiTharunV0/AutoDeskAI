@@ -105,6 +105,9 @@ class RequestOut(BaseModel):
     original_message: str
     status: str
     message: str
+    resolved: bool | None = None
+    resolution_reporter: str | None = None
+    resolution_attempts: int = 0
     created_at: datetime
     updated_at: datetime
     task: TaskOut | None
@@ -223,6 +226,19 @@ class AccessDecisionIn(Input):
 
 class TicketClosureSettingIn(Input):
     mode: Literal['AUTOMATIC', 'ADMIN_CONFIRMATION']
+
+class TicketCloseIn(Input):
+    resolved: bool
+
+class TicketResolutionOut(BaseModel):
+    request_id: int
+    status: str
+    resolved: bool | None
+    resolution_reporter: str | None
+    resolution_attempts: int
+    escalated: bool = False
+    retry_action: bool = False
+    message: str
 
 class AccessOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

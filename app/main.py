@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profile, upgrade_query_indexes, upgrade_application_access
 from app.models import *
 from app.schemas import *
-from app.catalog import SOFTWARE, APPLICATIONS
+from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS
 from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests
 from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, correct_legacy_access_requests
 from auth import (get_current_user, require_admin, hash_password, verify_password,
@@ -36,10 +36,10 @@ async def lifespan(app):
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
-        for key in APPLICATIONS:
+        for key, display_name in {**APPLICATIONS, **EXAMPLE_APPLICATIONS}.items():
             if not db.get(ApplicationPolicy, key):
-                db.add(ApplicationPolicy(key=key, display_name=APPLICATIONS[key] + ' (example)',
-                    description='Example catalog entry. No live provisioning integration is configured.'))
+                db.add(ApplicationPolicy(key=key, display_name=display_name + ' (example)',
+                    description='Example catalog entry. Admin approval required; no live provisioning integration is configured.'))
         if not db.get(AppSetting, 'ticket_closure_mode'):
             db.add(AppSetting(key='ticket_closure_mode', value='AUTOMATIC'))
         db.flush()
@@ -224,8 +224,9 @@ def request_detail(request_id: int, user=Depends(get_current_user), db: Session 
     expire_tasks(db)
     return owned_request(db, request_id, user)
 
-@app.post('/requests/{request_id}/close', response_model=RequestOut, tags=['Requests'])
-def employee_close_ticket(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+@app.post('/requests/{request_id}/close', response_model=TicketResolutionOut, tags=['Requests'])
+@app.post('/requests/{request_id}/resolution', response_model=TicketResolutionOut, tags=['Requests'])
+def employee_close_ticket(request_id: int, payload: TicketCloseIn, user=Depends(get_current_user), db: Session = Depends(get_db)):
     request = db.scalar(select(HelpdeskRequest).where(
         HelpdeskRequest.id == request_id, HelpdeskRequest.user_id == user.id
     ).with_for_update())
@@ -236,9 +237,62 @@ def employee_close_ticket(request_id: int, user=Depends(get_current_user), db: S
     if request.status not in closable:
         raise HTTPException(409, 'This ticket is still being handled and cannot be closed yet')
     previous_status = request.status
-    request.status = 'CLOSED'
-    request.message = (request.message + ' Employee marked this ticket closed.')[:500]
-    audit(db, user.id, 'TICKET_CLOSED_BY_EMPLOYEE', 'request', request.id, 'CLOSED', previous_status)
+    request.resolved = payload.resolved
+    request.resolution_reporter = 'EMPLOYEE'
+    if payload.resolved:
+        request.status = 'CLOSED'
+        request.message = (request.message + ' Employee reported the issue resolved and closed the ticket.')[:500]
+        audit(db, user.id, 'TICKET_CLOSED_BY_EMPLOYEE', 'request', request.id, 'CLOSED',
+              f'{previous_status}; employee reported resolved')
+        result = TicketResolutionOut(request_id=request.id, status=request.status,
+            resolved=True, resolution_reporter=request.resolution_reporter,
+            resolution_attempts=request.resolution_attempts or 0, message='Ticket closed as resolved. You can continue with another request.')
+    else:
+        request.resolution_attempts = (request.resolution_attempts or 0) + 1
+        can_retry = ((request.intent in ('PASSWORD_CHANGE', 'PASSWORD_RESET')
+                      and request.status == 'AWAITING_USER_ACTION')
+                     or (request.intent == 'SOFTWARE_INSTALL' and request.task
+                         and request.task.status in ('COMPLETED', 'FAILED')))
+        escalated = (request.resolution_attempts > 1 or not can_retry)
+        if escalated:
+            request.status = 'AWAITING_ADMIN'
+            request.message = 'Employee reports this issue is still unresolved after the available retry. Raised to an administrator for follow-up.'
+            audit(db, user.id, 'TICKET_ESCALATED_TO_ADMIN', 'request', request.id,
+                  request.status, f'{previous_status}; employee reported unresolved after {request.resolution_attempts} reports')
+            response_message = 'This issue is still unresolved, so I raised ticket #{0} to an administrator. An administrator has been notified.'.format(request.id)
+        else:
+            request.message = (request.message + ' Employee reported unresolved; retry the same action, then report the outcome again.')[:500]
+            audit(db, user.id, 'TICKET_REPORTED_UNRESOLVED', 'request', request.id,
+                  'RETRY_ACTION_REQUIRED', f'{previous_status}; retry {request.resolution_attempts} offered')
+            request.status = 'RETRY_ACTION_REQUIRED'
+            response_message = 'Sorry this is still unresolved. I will open the same action again. After trying it, tell me whether it worked.'
+        result = TicketResolutionOut(request_id=request.id, status=request.status,
+            resolved=False, resolution_reporter=request.resolution_reporter,
+            resolution_attempts=request.resolution_attempts, escalated=escalated,
+            retry_action=not escalated, message=response_message)
+    db.commit()
+    return result
+
+@app.post('/requests/{request_id}/retry-action', response_model=RequestOut, tags=['Requests'])
+def retry_employee_action(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    request = db.scalar(select(HelpdeskRequest).where(
+        HelpdeskRequest.id == request_id, HelpdeskRequest.user_id == user.id
+    ).options(selectinload(HelpdeskRequest.task)).with_for_update())
+    if not request:
+        raise HTTPException(404, 'Request not found')
+    if (request.intent != 'SOFTWARE_INSTALL' or request.resolution_attempts != 1
+            or request.status != 'RETRY_ACTION_REQUIRED'
+            or not request.task or request.task.status not in ('COMPLETED', 'FAILED')):
+        raise HTTPException(409, 'This action cannot be retried right now')
+    task = request.task
+    task.status = 'PENDING'
+    task.result = None
+    task.started_at = None
+    task.completed_at = None
+    request.status = 'PENDING'
+    request.message = 'Employee asked to retry the same approved software installation.'
+    audit(db, user.id, 'SOFTWARE_INSTALL_RETRIED_BY_EMPLOYEE', 'request', request.id,
+          'PENDING', f'Attempt {request.resolution_attempts + 1}')
     db.commit()
     return request
 
@@ -281,12 +335,19 @@ def password_action(request_id: int, user=Depends(get_current_user), db: Session
         raise HTTPException(404, "Request not found")
     if row.intent not in (*MICROSOFT_PASSWORD_URLS, "PASSWORD_RESET"):
         raise HTTPException(409, "Not a password workflow")
-    if row.status != "AWAITING_USER_ACTION":
+    retrying = row.status == 'RETRY_ACTION_REQUIRED' and row.resolution_attempts == 1
+    if row.status != "AWAITING_USER_ACTION" and not retrying:
         raise HTTPException(409, "Workflow is not awaiting user action")
     url = (configured_sspr_url() if row.intent == "PASSWORD_RESET"
            else MICROSOFT_PASSWORD_URLS[row.intent])
     if not url:
         raise HTTPException(503, "Organization password recovery is unavailable. Contact your IT administrator.")
+    if retrying:
+        row.status = 'AWAITING_USER_ACTION'
+        row.message = 'Retry opened at Microsoft. After completing the action, report whether the issue is resolved.'
+        audit(db, user.id, 'PASSWORD_ACTION_RETRIED', 'request', row.id,
+              row.status, f'Attempt {row.resolution_attempts + 1}')
+        db.commit()
     audit(db, user.id, row.intent + "_LINK_OPENED", "request", row.id, row.status,
           "Microsoft-hosted action issued; completion unverified")
     db.commit()
@@ -410,11 +471,20 @@ def close_ticket(request_id: int, user=Depends(require_admin), db: Session = Dep
     request = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.id == request_id).with_for_update())
     if not request:
         raise HTTPException(404, 'Request not found')
-    if request.status != 'AWAITING_ADMIN_CLOSE' or request.intent != 'SOFTWARE_INSTALL':
+    if request.status == 'AWAITING_ADMIN' and request.resolved is False:
+        request.status = 'CLOSED'
+        request.resolved = True
+        request.resolution_reporter = 'ADMIN'
+        request.message = 'An administrator followed up, marked the issue resolved, and closed the ticket.'
+        audit(db, user.id, 'TICKET_ESCALATION_CLOSED_BY_ADMIN', 'request', request.id, 'CLOSED')
+    elif request.status == 'AWAITING_ADMIN_CLOSE' and request.intent == 'SOFTWARE_INSTALL':
+        request.status = 'COMPLETED'
+        request.resolved = True
+        request.resolution_reporter = 'ADMIN'
+        request.message = 'Ticket closed by an administrator after confirming the reported installation result.'
+        audit(db, user.id, 'TICKET_CLOSED_BY_ADMIN', 'request', request.id, 'COMPLETED')
+    else:
         raise HTTPException(409, 'This ticket is not awaiting administrator closure')
-    request.status = 'COMPLETED'
-    request.message = 'Ticket closed by an administrator after confirming the reported installation result.'
-    audit(db, user.id, 'TICKET_CLOSED_BY_ADMIN', 'request', request.id, 'COMPLETED')
     db.commit()
     return request
 

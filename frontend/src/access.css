@@ -21,9 +21,12 @@
 .accessActions button { padding: 8px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); cursor: pointer; }
 .accessNotice { padding: 12px; border-radius: 8px; background: var(--soft); color: var(--teal); }
 .accessTicketGate { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid #ecd7a4; border-radius: 10px; background: #fff8e8; color: #705114; }
-.accessTicketGate b, .accessTicketGate small { display: block; }
+.accessTicketDetails { display: grid; gap: 3px; min-width: 0; }
+.accessTicketDetails b, .accessTicketDetails small { display: block; overflow-wrap: anywhere; }
 .accessTicketGate small { margin-top: 4px; line-height: 1.4; }
-.accessTicketGate button { flex: 0 0 auto; border: 1px solid #147a68; border-radius: 8px; padding: 8px 12px; background: #e8f5f1; color: #126c5d; font-weight: 750; cursor: pointer; }
+.accessTicketGate .ticketCloseChoices { display: grid; gap: 7px; flex: 0 0 auto; }
+.accessTicketGate button { border: 1px solid #147a68; border-radius: 8px; padding: 8px 12px; background: #e8f5f1; color: #126c5d; font-weight: 750; cursor: pointer; }
+.accessTicketGate button.unresolved { border-color: #aa761b; background: #fff; color: #78520a; }
 .accessPolicyHelp { grid-column: 1 / -1; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--muted); font-size: 13px; line-height: 1.5; }
 .addApplicationButton { width: fit-content; padding: 10px 15px; }
 .accessEditor { padding: 22px; border-color: color-mix(in srgb, var(--teal) 30%, var(--line)); background: var(--paper); box-shadow: 0 8px 24px rgba(19, 90, 76, .07); }

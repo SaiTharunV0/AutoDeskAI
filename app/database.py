@@ -70,6 +70,11 @@ def upgrade_application_access(db_engine=engine):
             'provision_attempts': 'INTEGER NOT NULL DEFAULT 0',
             'last_provision_attempt_at': 'TIMESTAMP',
         },
+        'helpdesk_requests': {
+            'resolved': 'BOOLEAN',
+            'resolution_reporter': 'VARCHAR(20)',
+            'resolution_attempts': 'INTEGER NOT NULL DEFAULT 0',
+        },
     }
     with db_engine.begin() as connection:
         for table, columns in additions.items():
