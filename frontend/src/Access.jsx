@@ -1,12 +1,10 @@
 import React, {useEffect, useState} from 'react';
 import PaginatedRows from './pagination.jsx';
 import {accessStatusLabel as label, pendingAccessRequests, buildAccessPayload, buildPolicyPayload, buildDecisionPayload} from './access_logic.js';
-import {validatedMicrosoftPasswordActionUrl} from './sspr.js';
 import './access.css';
 
 const split = value => value.split(',').map(item => item.trim()).filter(Boolean);
 const parseEvaluation = value => {try {return JSON.parse(value)} catch {return {}}};
-const employeeClosable = new Set(['COMPLETED', 'FAILED', 'REJECTED', 'AWAITING_USER_ACTION', 'NEEDS_CLARIFICATION', 'APPROVED_PROVISIONING_REQUIRED']);
 const defaultApplication = {
   key: '', display_name: '', description: '', enabled: true, required_role: 'employee',
   requestable_roles: ['viewer'], allowed_groups: [], default_duration_days: 30,
@@ -35,7 +33,7 @@ function AccessHistory({rows, admin = false, onRetry}) {
   </div>}</PaginatedRows>;
 }
 
-export function EmployeeAccess({api}) {
+export function EmployeeAccess({api, onContinueChat}) {
   const [applications, setApplications] = useState([]), [requests, setRequests] = useState([]), [tickets, setTickets] = useState([]);
   const [selected, setSelected] = useState(''), [role, setRole] = useState(''), [days, setDays] = useState(30);
   const [justification, setJustification] = useState(''), [loading, setLoading] = useState(true);
@@ -45,10 +43,7 @@ export function EmployeeAccess({api}) {
     .then(([apps, rows, allTickets]) => {if (live) {setApplications(apps);setRequests(rows);setTickets(allTickets);}})
     .catch(err => {if (live) setError(err.message)})
     .finally(() => {if (live) setLoading(false)}); return () => {live = false};}, [api]);
-  const openTicket = [...tickets].reverse().find(row => row.status !== 'CLOSED');
-  async function closeTicket(resolved) {if (!openTicket) return;setBusy(true);setError('');setNotice('');
-    try {if(openTicket.status==='RETRY_ACTION_REQUIRED'){if(openTicket.intent==='PASSWORD_CHANGE'||openTicket.intent==='PASSWORD_RESET'){const action=await api(`/requests/${openTicket.id}/password/action`,{method:'POST'}),url=validatedMicrosoftPasswordActionUrl(action.url);if(!url)throw new Error('Unapproved Microsoft password destination. Contact your IT administrator.');window.location.assign(url);return}if(openTicket.intent==='SOFTWARE_INSTALL'){await api(`/requests/${openTicket.id}/retry-action`,{method:'POST'});setTickets(await api('/requests'));setNotice('The same installation was queued again.');return}}if(!employeeClosable.has(openTicket.status))return;const outcome=await api(`/requests/${openTicket.id}/resolution`, {method: 'POST', body: JSON.stringify({resolved})});if(outcome.retry_action){setTickets(await api('/requests'));if(openTicket.intent==='PASSWORD_CHANGE'||openTicket.intent==='PASSWORD_RESET'){const action=await api(`/requests/${openTicket.id}/password/action`,{method:'POST'}),url=validatedMicrosoftPasswordActionUrl(action.url);if(!url)throw new Error('Unapproved Microsoft password destination. Contact your IT administrator.');window.location.assign(url);return}if(openTicket.intent==='SOFTWARE_INSTALL'){await api(`/requests/${openTicket.id}/retry-action`,{method:'POST'});setTickets(await api('/requests'));setNotice('The same installation was queued again.');return}}setNotice(outcome.message);setTickets(await api('/requests'))}
-    catch (err) {setError(err.message)} finally {setBusy(false)}}
+  const openTicket = [...tickets].reverse().find(row => !['CLOSED', 'REJECTED'].includes(row.status));
   function choose(key) {const item = applications.find(app => app.key === key);setSelected(key);
     setRole(item?.requestable_roles[0] || '');setDays(item?.default_duration_days || 30);setJustification('');}
   async function submit(event) {event.preventDefault();if (!current || busy) return;setBusy(true);setError('');setNotice('');
@@ -58,8 +53,7 @@ export function EmployeeAccess({api}) {
     catch (err) {setError(err.message)} finally {setBusy(false)}}
   return <section className="pageCard accessPage"><h1>Application Access</h1><p>Request an approved application and follow its decision and provisioning status.</p>
     {error && <div className="error" role="alert">{error}</div>}{notice && <div className="accessNotice" role="status">{notice}</div>}
-    {openTicket&&<div className="accessTicketGate" role="status"><span className="accessTicketDetails"><b>{openTicket.intent.replaceAll('_',' ')}</b><small><strong>Issue:</strong> {openTicket.original_message&&openTicket.original_message!=='[not retained]'?openTicket.original_message:openTicket.message}</small><small><strong>Current status:</strong> {label(openTicket.status)}</small><small><strong>Resolution:</strong> {openTicket.resolved===true?'Marked resolved by you':openTicket.resolved===false?'Marked not resolved by you':'Not confirmed yet'}</small>{openTicket.status==='AWAITING_USER_ACTION'&&<small>AutoDeskAI cannot verify the Microsoft outcome; choose the resolution that matches your experience.</small>}{openTicket.status==='APPROVED_PROVISIONING_REQUIRED'&&<small>Approval is recorded, but application access has not been verified by AutoDeskAI.</small>}{openTicket.status==='AWAITING_ADMIN_CLOSE'&&<small>An administrator must close this ticket first.</small>}</span>{employeeClosable.has(openTicket.status)&&<div className="ticketCloseChoices"><button type="button" disabled={busy} onClick={()=>closeTicket(true)}>Resolved</button><button type="button" className="unresolved" disabled={busy} onClick={()=>closeTicket(false)}>Not resolved</button></div>}</div>}
-    {openTicket?.status==='RETRY_ACTION_REQUIRED'&&<div className="accessTicketGate" role="status"><span><b>Retry the action</b><small>After trying it again, report whether the issue is resolved.</small></span><button type="button" disabled={busy} onClick={()=>closeTicket(false)}>Retry same action</button></div>}{openTicket?.status==='AWAITING_ADMIN'&&openTicket.resolved===false&&<div className="accessTicketGate" role="status"><span><b>This issue has been raised to an administrator</b><small>The issue is still unresolved. An administrator has been notified and will follow up.</small></span></div>}
+    {openTicket&&<div className="accessNotice" role="status"><p>Please return to the chat to finish your current request before starting another.</p><button type="button" onClick={onContinueChat}>Continue in chat</button></div>}
     {loading ? <div className="empty">Loading applications...</div> : <>
       <div className="accessCatalog">{applications.map(item => <button type="button" key={item.key} className={'accessApp ' + (selected === item.key ? 'selected' : '')} onClick={() => choose(item.key)}>
         <b>{item.display_name}</b><small>{item.description}</small><span>{item.requestable_roles.join(', ')} · Up to {item.max_duration_days} days</span>

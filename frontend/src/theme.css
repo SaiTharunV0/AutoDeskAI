@@ -304,7 +304,8 @@ input:hover, select:hover, textarea:hover { border-color: #9dbdb3; }
 .pagination button, .paginationSize select { min-height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface, #fff); color: var(--ink); font: inherit; }
 .pagination button { cursor: pointer; }
 .pagination button:disabled { opacity: .45; cursor: default; }
-.pagination button.current { min-width: 38px; border-color: #72003d; background: #72003d; color: #fff; font-weight: 700; }
+.pagination button:hover:not(:disabled):not(.current) { border-color: var(--teal); background: var(--soft); color: var(--teal-dark); }
+.pagination button.current { min-width: 38px; border-color: var(--teal); background: var(--teal); color: #fff; font-weight: 700; }
 .paginationEllipsis { padding: 0 3px; }
 .paginationSize { display: flex; align-items: center; justify-self: end; gap: 10px; white-space: nowrap; }
 .paginationSize select { min-width: 86px; }

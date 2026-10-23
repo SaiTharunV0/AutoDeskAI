@@ -103,7 +103,7 @@ def submit_access(db, user, application, requested_role, justification, duration
             HelpdeskRequest.user_id == user.id, HelpdeskRequest.status != 'CLOSED'
         ).order_by(HelpdeskRequest.id).limit(1))
         if open_ticket:
-            raise HTTPException(409, f'Close ticket #{open_ticket.id} before sending another request.')
+            raise HTTPException(409, 'Please finish your current request and confirm whether it worked before starting another.')
     row = db.get(ApplicationPolicy, application.lower().strip())
     if not row or not row.enabled:
         raise HTTPException(404, 'Application is unavailable')
@@ -122,10 +122,10 @@ def submit_access(db, user, application, requested_role, justification, duration
     decision = evaluation['decision']
     status = ('APPROVED_PROVISIONING_REQUIRED' if decision == 'AUTOMATIC_APPROVAL' else
               'AWAITING_ADMIN' if decision == 'REQUIRE_ADMIN_APPROVAL' else 'REJECTED')
-    reason = ('Automatically approved under the recorded policy; real provisioning is required.'
+    reason = ('Your access request is approved. Access still needs to be set up before you can use the application.'
               if decision == 'AUTOMATIC_APPROVAL' else
-              'Waiting for an administrator decision.' if status == 'AWAITING_ADMIN' else
-              'The configured policy denied this request.')
+              'I’ve sent your request to an administrator for review. I’ll update you when they decide.' if status == 'AWAITING_ADMIN' else
+              'This access request is not authorised under your organisation’s policy.')
     request = existing_request or HelpdeskRequest(user_id=user.id, intent='ACCESS_REQUEST',
         original_message=f'Application access: {row.display_name or row.key}',
         idempotency_key=idempotency_key)
@@ -144,6 +144,8 @@ def submit_access(db, user, application, requested_role, justification, duration
     audit(db, user.id, 'ACCESS_REQUESTED', 'request', request.id, status, f'{row.key} / {requested_role}')
     audit(db, None, 'ACCESS_POLICY_EVALUATED', 'request', request.id, status,
           f'{row.key} v{row.version}: {decision}')
+    from app.workflows import close_rejected_request
+    close_rejected_request(db, request)
     try:
         db.commit()
     except IntegrityError:
@@ -170,13 +172,15 @@ def decide_access(db, access_id, admin, decision, reason):
     access.decision_at = now()
     access.decision_reason = reason.strip()
     access.request.message = (f'Approved by an administrator. Real provisioning is required.'
-                              if decision == 'APPROVE' else f'Rejected by an administrator. {reason.strip()}')[:500]
+                              if decision == 'APPROVE' else f'Your administrator couldn’t approve this request. {reason.strip()}')[:500]
     if decision == 'APPROVE' and policy:
         attempt_provision(db, policy, access)
     else:
         access.provisioning_status = 'NOT_CONFIGURED' if decision == 'APPROVE' else 'NOT_STARTED'
     audit(db, admin.id, 'ACCESS_ADMIN_APPROVED' if decision == 'APPROVE' else 'ACCESS_ADMIN_REJECTED',
           'request', access.request_id, status, reason.strip())
+    from app.workflows import close_rejected_request
+    close_rejected_request(db, access.request)
     db.commit()
     return access
 

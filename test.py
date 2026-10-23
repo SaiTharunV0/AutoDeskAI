@@ -156,7 +156,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(action["url"], "https://myaccount.microsoft.com/")
         self.assertEqual(action["status"], "AWAITING_USER_ACTION")
         for _ in range(4):
-            self.assertEqual(self.request(Intent.PASSWORD_RESET, "forgot password").status_code, 201)
+            self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
+                json={'resolved': True}).status_code, 200)
+            response = self.request(Intent.PASSWORD_RESET, "forgot password")
+            self.assertEqual(response.status_code, 201)
+            row = response.json()
+        self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
+            json={'resolved': True}).status_code, 200)
         self.assertEqual(self.request(Intent.PASSWORD_RESET, "forgot password").status_code, 429)
         self.assertEqual(self.client.get('/requests',headers=self.headers()).status_code, 200)
 
@@ -172,11 +178,58 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(updated["status"], "AWAITING_USER_ACTION")
         self.assertIn("Legacy simulation", updated["message"])
     def test_access_policy_and_unknown_application(self):
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"AWAITING_ADMIN")
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access unknown",application="unknown").json()["status"],"REJECTED")
+        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access unknown",application="unknown").json()["status"],"CLOSED")
         self.client.put("/admin/applications/tableau",headers=self.headers(self.admin),
                         json={"enabled":True,"required_role":"admin"})
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"REJECTED")
+        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"CLOSED")
+
+    def test_rejected_ticket_closes_without_employee_confirmation(self):
+        row = self.request(Intent.ACCESS_REQUEST, 'how can i request access to youtube', application='unknown').json()
+        self.assertEqual(row['status'], 'CLOSED')
+        self.assertIsNone(row['resolved'])
+        self.assertIn('not authorised', row['message'])
+        self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
+            json={'resolved': True}).status_code, 409)
+        self.assertEqual(self.request(Intent.PASSWORD_RESET, 'forgot password').status_code, 201)
+        with self.sessions() as db:
+            self.assertIsNotNone(db.scalar(select(AuditLog).where(
+                AuditLog.resource_id == row['id'], AuditLog.action == 'REJECTED_TICKET_CLOSED')))
+
+    def test_admin_rejection_closes_parent_ticket(self):
+        from app.access import decide_access
+        row = self.client.post('/access/requests', headers=self.headers(), json={
+            'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
+            'idempotency_key': secrets.token_hex(16)}).json()
+        with self.sessions() as db:
+            access = decide_access(db, row['id'], db.get(User, self.admin['user']['id']), 'DENY', 'Not authorised')
+            self.assertEqual(access.status, 'REJECTED')
+            self.assertEqual(access.request.status, 'CLOSED')
+            self.assertIsNone(access.request.resolved)
+        self.assertEqual(self.request(Intent.PASSWORD_RESET, 'forgot password').status_code, 201)
+
+    def test_confirmation_blocks_new_chat_and_access_requests(self):
+        row = self.request(Intent.PASSWORD_RESET, 'forgot password').json()
+        self.assertEqual(self.request(Intent.ACCESS_REQUEST, 'access Tableau', application='tableau').status_code, 409)
+        payload = {'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
+                   'idempotency_key': secrets.token_hex(16)}
+        self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json=payload).status_code, 409)
+        self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
+            json={'resolved': True}).status_code, 200)
+        self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json=payload).status_code, 201)
+
+    def test_legacy_rejections_close_once_without_resolution(self):
+        from app.workflows import close_legacy_rejections
+        with self.sessions() as db:
+            row = HelpdeskRequest(user_id=self.employee['user']['id'], intent='ACCESS_REQUEST',
+                status='REJECTED', message='Access denied.', idempotency_key=secrets.token_hex(16))
+            db.add(row)
+            db.commit()
+            close_legacy_rejections(db)
+            close_legacy_rejections(db)
+            self.assertEqual(row.status, 'CLOSED')
+            self.assertIsNone(row.resolved)
+            self.assertEqual(len(db.scalars(select(AuditLog).where(
+                AuditLog.resource_id == row.id, AuditLog.action == 'REJECTED_TICKET_CLOSED')).all()), 1)
 
     def access_policy_payload(self, key='github', **changes):
         return {'key': key, 'display_name': key.title() + ' (example)', 'description': 'No live integration',
@@ -240,7 +293,7 @@ class WorkflowTests(unittest.TestCase):
             'justification': 'Different reason'}).status_code, 409)
         self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json={**request,
             'idempotency_key': secrets.token_hex(16)}).status_code, 409)
-        self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json={**request,
+        self.assertEqual(self.client.post('/access/requests', headers=self.headers(self.other), json={**request,
             'requested_role': 'owner', 'idempotency_key': secrets.token_hex(16)}).status_code, 422)
         decision_url = '/admin/access/requests/' + str(first['id']) + '/decision'
         self.assertEqual(self.client.post(decision_url, headers=self.headers(), json={
@@ -269,6 +322,9 @@ class WorkflowTests(unittest.TestCase):
             'idempotency_key': secrets.token_hex(16)}).json()
         self.assertEqual(denied['status'], 'REJECTED')
         self.assertEqual(denied['policy_version'], 2)
+        ticket = self.client.get('/requests/'+str(denied['request_id']), headers=self.headers(self.other)).json()
+        self.assertEqual(ticket['status'], 'CLOSED')
+        self.assertIsNone(ticket['resolved'])
 
     def test_provisioning_timeout_failure_and_admin_retry(self):
         payload = self.access_policy_payload(approval_mode='AUTOMATIC', auto_allowed=True)
@@ -305,6 +361,7 @@ class WorkflowTests(unittest.TestCase):
     def test_application_access_migration_preserves_existing_rows(self):
         old = create_engine('sqlite://')
         with old.begin() as connection:
+            connection.execute(text('CREATE TABLE helpdesk_requests (id INTEGER PRIMARY KEY)'))
             connection.execute(text('CREATE TABLE application_policies (key VARCHAR(80) PRIMARY KEY, enabled BOOLEAN, required_role VARCHAR(30))'))
             connection.execute(text("INSERT INTO application_policies VALUES ('tableau', 1, 'employee')"))
             connection.execute(text('CREATE TABLE access_requests (id INTEGER PRIMARY KEY, request_id INTEGER, user_id INTEGER, application VARCHAR(80), status VARCHAR(30), decision_reason VARCHAR(200), created_at TIMESTAMP)'))
@@ -357,8 +414,8 @@ class WorkflowTests(unittest.TestCase):
             json={"success":True}).status_code,404)
         self.assertEqual(self.client.get("/agent/tasks",headers=self.headers()).status_code,401)
     def test_unapproved_software_and_invalid_device(self):
-        self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install malware",software="malware").json()["status"],"REJECTED")
-        self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install vscode",software="vscode",device_id=999).json()["status"],"REJECTED")
+        self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install malware",software="malware").json()["status"],"CLOSED")
+        self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install vscode",software="vscode",device_id=999).json()["status"],"CLOSED")
         with self.assertRaises(ValueError): install("powershell")
         with self.assertRaises(ValueError): install("vscode",False)
     def test_command_and_secrets_rejected(self):
@@ -442,11 +499,13 @@ class WorkflowTests(unittest.TestCase):
 
     def test_request_status_chat_only_reads_own_requests(self):
         row = self.request(Intent.PASSWORD_RESET, 'forgot password').json()
+        self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
+            json={'resolved': True}).status_code, 200)
         response = self.client.post('/requests', headers=self.headers(), json={
             'message':'What is the status of my requests?', 'idempotency_key':'status-query-001'})
         self.assertEqual(response.status_code, 200)
         self.assertIn(f'#{row["id"]}', response.json()['message'])
-        self.assertIn('Awaiting User Action', response.json()['message'])
+        self.assertIn('Closed', response.json()['message'])
 
     def test_chat_rejects_oversize_and_prompt_injection_without_model_call(self):
         too_long = self.client.post('/requests', headers=self.headers(), json={
@@ -489,7 +548,7 @@ class WorkflowTests(unittest.TestCase):
         row = self.request(Intent.SOFTWARE_INSTALL,'install vscode',software='vscode',device_id=device['device']['id']).json()
         self.client.put('/admin/software/vscode',headers=self.headers(self.admin),json={'enabled':False})
         self.assertEqual(self.client.get('/agent/tasks',headers=device['headers']).json(),[])
-        self.assertEqual(self.client.get('/requests/'+str(row['id']),headers=self.headers()).json()['status'],'REJECTED')
+        self.assertEqual(self.client.get('/requests/'+str(row['id']),headers=self.headers()).json()['status'],'CLOSED')
 
     def test_ai_failure_is_audited(self):
         with patch('app.workflows.process_request',side_effect=RuntimeError('untrusted detail')):
@@ -508,7 +567,7 @@ class WorkflowTests(unittest.TestCase):
                 'message':'Tableau','previous_request_id':row['id'],'idempotency_key':'stolen-context'})
             self.assertEqual(response.status_code,404)
             ai.assert_not_called()
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST,'access unknown',application='tableau').json()['status'],'REJECTED')
+        self.assertEqual(self.request(Intent.ACCESS_REQUEST,'access unknown',application='tableau',previous_request_id=row['id']).json()['status'],'CLOSED')
 
     def test_password_hash_and_no_credentials_in_audits(self):
         with self.sessions() as db:

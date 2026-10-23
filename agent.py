@@ -103,12 +103,12 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
     if not words & {"password", "install", "installed", "setup", "download", "access", "permission", "grant"}:
         if words & {"hello", "hi", "thanks", "thank"}:
             return AgentResponse(intent=Intent.CHAT,
-                message="Hello! I can help with organization password changes or resets, approved software installation, application access, and your request statuses.")
+                message="Hi! What do you need help with today? I can help with your work password, approved software, application access, or an existing request.")
         if "help" in words:
             return AgentResponse(intent=Intent.CHAT,
                 message="I can help change or reset your organization password, install approved software on your registered device, request application access, or check your request statuses. I can’t answer general questions or perform unrelated actions.")
         if previous_response and previous_response.intent == Intent.CLARIFICATION:
-            return AgentResponse(intent=Intent.CLARIFICATION, message="Please choose a supported option: password change/reset, Visual Studio Code installation, or Tableau access.")
+            return AgentResponse(intent=Intent.CLARIFICATION, message="What would you like help with: your work password, installing Visual Studio Code, or getting access to Tableau?")
         if words & {"tableau", "vscode"}:
             return AgentResponse(intent=Intent.CLARIFICATION, message="Would you like Tableau access or Visual Studio Code installation?")
         return AgentResponse(intent=Intent.UNSUPPORTED,

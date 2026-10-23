@@ -16,6 +16,24 @@ def audit(db, user_id, action, resource_type, resource_id, status, details=""):
     db.add(AuditLog(user_id=user_id, action=action, resource_type=resource_type,
                     resource_id=resource_id, status=status, details=details))
 
+def close_rejected_request(db, request):
+    """Keep the decision in history without asking employees to confirm a denial."""
+    if request.status != 'REJECTED':
+        return
+    request.status = 'CLOSED'
+    request.resolved = None
+    request.resolution_reporter = None
+    request.message = request.message[:440] + ' I have closed this ticket; no confirmation is needed.'
+    audit(db, request.user_id, 'REJECTED_TICKET_CLOSED', 'request', request.id,
+          'CLOSED', 'Rejected automatically; no employee resolution reported')
+
+
+def close_legacy_rejections(db):
+    for request in db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.status == 'REJECTED')):
+        close_rejected_request(db, request)
+    db.commit()
+
+
 def owned_request(db, request_id, user):
     request = db.get(HelpdeskRequest, request_id)
     if not request or (request.user_id != user.id and
@@ -63,7 +81,7 @@ def create_workflow(db, user, payload):
     continuing_clarification = (open_ticket and open_ticket.status == 'NEEDS_CLARIFICATION'
                                 and payload.previous_request_id == open_ticket.id)
     if open_ticket and not continuing_clarification:
-        raise HTTPException(409, f'Close ticket #{open_ticket.id} before sending another chat message.')
+        raise HTTPException(409, 'Please finish your current request and confirm whether it worked before starting another.')
     check_chat_rate(db, user.id, payload.message)
     try:
         safe = safe_message(payload.message)
@@ -124,29 +142,29 @@ def create_workflow(db, user, payload):
         request.message = ("Continue at Microsoft My Account to change your organization password. "
                            if result.intent == Intent.PASSWORD_CHANGE else
                            "Continue at Microsoft Self-Service Password Reset to recover your organization account. ") + \
-                          "AutoDeskAI cannot verify completion; this request remains awaiting user action."
+                          "When you return, let me know whether it worked. I can't check the result at Microsoft."
         audit(db, user.id, result.intent.value + "_REQUESTED", "request", request.id, request.status)
     elif result.intent == Intent.SOFTWARE_INSTALL:
         key = software_key(result.software)
         policy = db.get(SoftwarePolicy, key) if key else None
         # Even a fabricated model response cannot select a target absent from input.
         if not key or key not in safe.split() or not policy or not policy.enabled:
-            request.status, request.message = "REJECTED", "Software is not approved."
+            request.status, request.message = "REJECTED", "This software is not authorised for installation through AutoDeskAI."
         else:
             device = db.get(Device, payload.device_id) if payload.device_id else None
             if not device or device.owner_user_id != user.id or device.status != "ACTIVE":
-                request.status, request.message = "REJECTED", "Select an active device registered to your account."
+                request.status, request.message = "REJECTED", "I couldn't start the installation because no active device was selected. Please select a device registered to your account and try again."
             elif device.last_seen < now() - timedelta(seconds=config.DEVICE_OFFLINE_SECONDS):
-                request.status, request.message = "FAILED", "Device is offline. Start its agent and retry."
+                request.status, request.message = "FAILED", "Your device appears to be offline. Please start its agent, then try the installation again."
             else:
-                request.status, request.message = "PENDING", "Approved installation queued for your endpoint agent."
+                request.status, request.message = "PENDING", "I've queued the approved installation for your device. I'll update you when its agent reports back."
                 db.add(SoftwareTask(request_id=request.id, device_id=device.id, software=key))
         audit(db, user.id, "SOFTWARE_INSTALL_REQUESTED", "request", request.id, request.status)
     elif result.intent == Intent.ACCESS_REQUEST:
         key = (result.application or "").strip().lower()
         policy = db.get(ApplicationPolicy, key) if key in safe.split() else None
         if not policy or not policy.enabled or (policy.required_role == 'admin' and user.role != 'admin'):
-            request.status, request.message = 'REJECTED', 'Application is unavailable or not requestable.'
+            request.status, request.message = 'REJECTED', "This application is not authorised for access through AutoDeskAI, so I can't grant access to it."
             audit(db, user.id, 'ACCESS_REJECTED', 'request', request.id, request.status)
         else:
             from app.access import submit_access
@@ -159,9 +177,9 @@ def create_workflow(db, user, payload):
         if result.message == "Please request one workflow at a time.":
             request.message = result.message
         elif "access" in safe or (previous and "application" in previous.message):
-            request.message = "Which application do you need access to? Supported: Tableau."
+            request.message = "Which application do you need access to? I can help you request Tableau access."
         elif any(word in safe.split() for word in ("install", "installed", "setup", "download")):
-            request.message = "Which software would you like to install? Supported: Visual Studio Code."
+            request.message = "Which software would you like to install? I can help with Visual Studio Code."
         else:
             request.message = "Please specify password change/reset, software installation, or application access."
         audit(db, user.id, "CLARIFICATION_REQUESTED", "request", request.id, request.status)
@@ -169,5 +187,6 @@ def create_workflow(db, user, payload):
         request.status = "REJECTED"
         request.message = "This request is not supported."
         audit(db, user.id, "UNSUPPORTED_REQUEST", "request", request.id, request.status)
+    close_rejected_request(db, request)
     db.commit()
     return request

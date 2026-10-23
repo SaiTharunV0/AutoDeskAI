@@ -11,7 +11,10 @@ AutoDeskAI is an IT helpdesk prototype with a FastAPI backend, PostgreSQL databa
 - Password change requests open Microsoft's hosted My Account. Organization password reset uses Microsoft Entra SSPR at the configured `MICROSOFT_SSPR_URL` (default `https://passwordreset.microsoftonline.com/`). AutoDeskAI cannot verify the outcome and leaves reset requests at `AWAITING_USER_ACTION`. The AutoDeskAI login password is separate.
 - VS Code installation is simulated by an enrolled, online endpoint agent. Application access uses a configurable backend approval policy and records simulated provisioning; it does not grant an external account.
 - Administrators can review requests, users, devices, audit history, and application catalog and approval policies. They can decide pending access requests, enroll and disable endpoint devices.
-- Employees report in chat whether the issue is resolved. A supported password or software action is offered once more after the first unresolved report; a second unresolved report raises the ticket to an administrator and displays an in-app admin alert. Requests without a safe employee retry path, such as simulated application access, are escalated directly. A resolved report closes the ticket and is stored with its audit history; the outcome is self-reported, not provider verification.
+- Rejected requests close automatically without asking for employee confirmation, including policy denials, administrator rejections, and revoked software approvals. The rejection reason and audit history are retained; rejected tickets are not marked employee-resolved. Existing rejected tickets are closed on startup.
+- Employees confirm completion using Resolved / Not resolved choices inside the chat. Starting another request prompts them to confirm the previous outcome first; the same gate applies to the application access form. A supported password or software action is offered once more after the first unresolved report; a second unresolved report raises the same issue to an administrator and displays an in-app admin alert. Requests without a safe employee retry path, such as application access, are escalated directly. A resolved report closes the ticket and is stored with its audit history; the outcome is self-reported, not provider verification.
+- Ticket closure policy is configurable by an administrator: successful endpoint work can close automatically or wait for administrator confirmation. Employee resolution is tracked separately from administrator closure and provider provisioning results.
+- The request detail view shows the issue, current status, employee-reported resolution, and full event history without pagination. The visible `Ticket #` prefix has been removed from ticket labels. Pagination on larger lists uses the application's teal theme.
 
 ## Research foundation and scope
 
@@ -25,6 +28,29 @@ This project is based on Mani et al., *Hi, how can I help you?: Automating enter
 | Automate suitable resolution steps | Approved software requests can be dispatched to an enrolled endpoint agent; access decisions can use configured automatic approval rules. | Endpoint installation and access provisioning are simulations. AutoDeskAI does not claim a real change succeeded unless a configured provider can verify it. |
 | Learn from support interactions | Requests and administrator decisions are audited for operational review. | Audit history is not used to retrain a classifier or automatically create knowledge answers. Continuous learning is not implemented. |
 | Ingest enterprise knowledge and answer questions from it | The application catalog and fixed workflow guidance provide limited, controlled support information. | There is no ingestion pipeline for documents, tickets, images, audio, or video, and no retrieval augmented QA system. General questions are out of scope. |
+
+### Access decision model
+
+For an access request `r`, employee account `u`, and application policy `p`, the implemented outcomes are:
+
+\[
+D(r,u,p)=\begin{cases}
+\text{Clarify}, & \text{if required request details are unclear or missing}\\
+\text{Reject}, & \text{if the app is disabled, the requester or role is ineligible, or a failed check uses a DENY fallback}\\
+\text{Auto-approve}, & \text{if policy permits automation and all required checks pass}\\
+\text{Admin review}, & \text{if policy requires a person or required checks are unverified and fallback requires approval}
+\end{cases}
+\]
+
+There is no separate `Block` decision in the current access evaluator. Requests outside supported chat scope receive a fixed response and are not submitted as access requests. A required fact the system cannot verify (for example, directory group membership or MFA) cannot pass automatic approval; it follows the application's configured fallback. Approval only authorizes a provisioning attempt and does not confirm that access was granted.
+
+The employee-reported resolution metric is:
+
+\[
+\text{Employee-reported resolution rate}=\frac{\text{closed tickets marked resolved by employees}}{\text{closed tickets with a recorded resolution outcome}}\times 100\%
+\]
+
+This measures employee reports, not independently verified fixes. Tickets with no recorded outcome are excluded from the denominator. The project records outcomes and history but does not currently show this rate as a dashboard metric.
 
 The paper's key design principles for this prototype are orchestration, explicit clarification, backend-owned decisions, appropriate human approval, and truthful reporting of action outcomes. The intentionally unimplemented research components above should be treated as future scope, not as existing features. Any expansion to knowledge ingestion or learned answers should add source tracking, access controls, and human review before answers or policies affect users.
 
@@ -85,13 +111,19 @@ Wait for a heartbeat before submitting an installation request. The agent only s
 
 The employee **Application Access** page loads enabled entries from `GET /access/applications`. Employees choose an application, one of its requestable roles, a duration, and a business justification. Their JWT determines the requester; `GET /access/requests` and `GET /access/requests/{id}` return only their own records. The existing chat can still identify Tableau access requests; it uses the same backend evaluator and the catalog's default role and duration. Other catalog entries are requested through the dedicated page.
 
-The admin **Application Access** page creates and edits entries, shows the approval queue, records approve/reject decisions with reasons, and displays request history, policy versions, evaluated conditions, and provisioning status. `POST /admin/access/applications` creates an entry; `PUT /admin/access/applications/{key}` increments its version and stores an immutable snapshot in `access_policy_revisions`. Existing requests retain their evaluated policy version. The older `PUT /admin/applications/{key}` route remains available for its enabled/role controls and also increments the version.
+The admin **Application Access** page creates and edits entries, shows the approval queue, records decisions, and displays request history, policy versions, evaluated conditions, and provisioning status. Approval does not require an administrator reason; rejection requires a reason. `POST /admin/access/applications` creates an entry; `PUT /admin/access/applications/{key}` increments its version and stores an immutable snapshot in `access_policy_revisions`. Existing requests retain their evaluated policy version. The older `PUT /admin/applications/{key}` route remains available for its enabled/role controls and also increments the version.
 
 The built-in Tableau, GitHub, Jira, and Power BI entries are **examples**, with `ADMIN_ONLY` approval by default. Admins can edit or disable them and add further applications, but catalog registration alone does not create an integration. Policies have `AUTOMATIC`, `CONDITIONAL`, and `ADMIN_ONLY` modes, requestable and human-only roles, allowed groups, durations, risk, conditions, and `REQUIRE_ADMIN_APPROVAL` or `DENY` fallback. Automatic approval requires `auto_allowed`, an eligible low/medium-risk role, and every condition to pass. High-risk and human-only roles always require an administrator. The local JWT has no trusted directory group, HR employment, or verified MFA claims, so those conditions evaluate as **unverified** and take the fallback. A failed condition also takes the fallback. The evaluator records its condition results, decision, fallback and policy version on each request, with audit entries for evaluation and manual decisions. Administrators cannot decide their own requests.
 
 Approval is separate from provisioning. Approved requests use `APPROVED_PROVISIONING_REQUIRED`; they do not become `GRANTED`. The built-in `MOCK` provider validates the application and role, records `SIMULATED`, and makes no external grant. `NONE` records `NOT_CONFIGURED`. A provider timeout or failure is recorded as `TIMEOUT` or `FAILED`; an administrator can retry those attempts through `POST /admin/access/requests/{id}/provisioning/retry`. Retry attempts are counted and audited. No production provider, real access expiration, or revocation job is configured. `config_ref` is only an uppercase configuration *reference*, never a credential, and is omitted from employee catalog responses. Production integrations would need official provider APIs, backend-only credentials and permission scope, idempotent grant and verification, and expiration/revocation handling before a request could be marked granted.
 
 At startup, `upgrade_application_access()` adds catalog and access-request columns to existing installations without deleting records. A new `access_policy_revisions` table is created by SQLAlchemy. Legacy demo approvals that explicitly said no external access was provisioned are corrected to `APPROVED_PROVISIONING_REQUIRED` and audited. The backend deploy on Render runs this migration at startup; Vercel's existing `/api` rewrite already forwards the new routes. No new environment variables are required for the mock provider.
+
+### Employee resolution and ticket closure
+
+After a password action or other supported task, the employee chooses **Resolved** or **Not resolved** in chat. Choosing resolved closes the ticket and records the reporter, outcome, and audit event; the employee can then continue. Choosing not resolved offers one retry for password or software work. If the employee still reports failure, the request is moved to administrator review and appears in the admin UI. Application access has no automatic employee retry because its provider is simulated or unconfigured; an unresolved report is escalated. Admins can close an escalated request and record themselves as the resolution reporter. The admin ticket-closure setting controls whether successful endpoint tasks also require administrator confirmation.
+
+The chat and Application Access page show the open request's issue text, status, and resolution state. They keep employees from starting another normal request until the current ticket is closed; a clarification reply remains tied to its original request. The admin request list shows request type without a ticket number. Opening request details shows the complete history at once; only larger lists use pagination.
 
 | Request | Result |
 | --- | --- |

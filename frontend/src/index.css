@@ -627,3 +627,7 @@ input::placeholder { color: #8498ad; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+.chat .ticketCloseChoices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chat .ticketCloseChoices button { margin: 0; }
+.chat .bubble p { margin: 8px 0; }

@@ -16,7 +16,7 @@ from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profil
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS
-from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests
+from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections
 from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, correct_legacy_access_requests
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
@@ -33,6 +33,7 @@ async def lifespan(app):
     with SessionLocal() as db:
         correct_legacy_password_requests(db)
         correct_legacy_access_requests(db)
+        close_legacy_rejections(db)
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
@@ -232,7 +233,7 @@ def employee_close_ticket(request_id: int, payload: TicketCloseIn, user=Depends(
     ).with_for_update())
     if not request:
         raise HTTPException(404, 'Request not found')
-    closable = {'COMPLETED', 'FAILED', 'REJECTED', 'AWAITING_USER_ACTION',
+    closable = {'COMPLETED', 'FAILED', 'AWAITING_USER_ACTION',
                 'NEEDS_CLARIFICATION', 'APPROVED_PROVISIONING_REQUIRED'}
     if request.status not in closable:
         raise HTTPException(409, 'This ticket is still being handled and cannot be closed yet')
@@ -409,6 +410,7 @@ def tasks(device=Depends(current_device), db: Session = Depends(get_db)):
             task.status = task.request.status = "REJECTED"
             task.result = task.request.message = "Software approval was revoked before dispatch."
             audit(db, task.request.user_id, "SOFTWARE_INSTALL_REJECTED", "request", task.request_id, "REJECTED")
+            close_rejected_request(db, task.request)
             continue
         task.status = task.request.status = "PROCESSING"
         task.started_at = now()
