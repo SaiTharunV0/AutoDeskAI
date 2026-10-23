@@ -47,7 +47,16 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 }
 .primary:hover:not(:disabled), .send:hover:not(:disabled), [data-theme="dark"] .primary:hover:not(:disabled), [data-theme="dark"] .send:hover:not(:disabled) { background: #125441; }
 .app { display: block; min-height: 100dvh; background: var(--canvas); }
-.app > .workspaceMain { min-width: 0; margin-left: 240px; }
+.app > .workspaceMain { width: auto; min-width: 0; margin-left: 240px; }
+.workspaceMain { overflow-wrap: anywhere; }
+.workspaceMain :is(input, select, textarea) { min-width: 0; max-width: 100%; }
+.workspaceMain :is(.pageTitle, .sectionHead, .dashboardHero, .intro) > div { min-width: 0; }
+.workspaceMain :is(.sectionHead, .activeFilters, .endpointCardFoot, .endpointAdminRow) { flex-wrap: wrap; }
+.workspaceMain :is(.sectionHead, .endpointCardTop, .endpointCardFoot, .knowledgeLead, .knowledgeNotice, .knowledgeRelated article, .knowledgeFlowHead) > * { min-width: 0; }
+.workspaceMain :is(.sectionHead > button, .closeTicketButton, .detailsLink, .requestAction, .auditViewButton) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.workspaceMain .adminGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workspaceMain :is(.adminGrid, .managerColumns, .helpRail, .requestMeta) > * { min-width: 0; }
+.workspaceMain .managerColumns { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
 .skipLink { position: fixed; z-index: 100; top: -60px; left: 260px; padding: 10px 18px; border-radius: 8px; background: var(--paper); color: var(--ink); }
 .skipLink:focus { top: 12px; }
 .workspaceSidebar {
@@ -83,10 +92,12 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .sidebarAccount .avatar { width: 32px; height: 32px; flex: 0 0 auto; background: #466b52; color: #e9f4db; font-size: 12px; font-weight: 600; }
 .sidebarAccount > div:nth-child(2) { flex: 1; min-width: 0; }
 .sidebarAccount b { display: block; font-size: 12px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebarAccount small { display: block; color: #91b4a0; font-size: 11px; }
+.sidebarAccount small { display: block; color: #91b4a0; font-size: 11px; overflow-wrap: anywhere; }
 .sidebarAccount .logout, [data-theme="dark"] .sidebarAccount .logout { display: grid; place-items: center; padding: 6px; border: 0; background: transparent; color: #91b4a0; }
 .app .appHeader, [data-theme="dark"] .app .appHeader { display: flex; position: sticky; top: 0; z-index: 20; gap: 28px; padding: 0 36px; height: 76px; min-height: 76px; background: var(--paper); border-bottom: 1px solid var(--line); box-shadow: none; }
-.workspaceBreadcrumb { display: flex; align-items: center; gap: 9px; white-space: nowrap; font-size: 12px; }
+.workspaceBreadcrumb { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 12px; }
+.workspaceBreadcrumb > b { overflow-wrap: anywhere; }
+.workspaceBreadcrumb > svg, .mobileMenu, .headRight { flex-shrink: 0; }
 .workspaceBreadcrumb span, .workspaceBreadcrumb svg { color: var(--muted); }
 .workspaceBreadcrumb b { font-weight: 600; }
 .app .search, [data-theme="dark"] .app .search { max-width: 290px; height: 36px; min-height: 36px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); gap: 8px; padding: 0 10px; }
@@ -163,7 +174,7 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .thinking > span:nth-child(3) { animation-delay: .4s; }
 .thinking small { margin: 0 0 0 5px; }
 @keyframes thinking { 50% { opacity: .3; transform: translateY(-2px); } }
-.helpRail { display: grid; gap: 18px; }
+.workspaceMain .helpRail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 .quickHelp, .recentActivity { padding: 21px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); }
 .quickHelp h2, .recentActivity h2 { margin: 6px 0; font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
 .quickHelp > p { color: var(--muted); margin: 5px 0 17px; font-size: 12px; line-height: 1.65; }
@@ -201,8 +212,14 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .requestFilters button { display: flex; align-items: center; gap: 8px; border: 1px solid transparent; border-radius: 7px; padding: 7px 11px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 500; }
 .requestFilters button.selected { border-color: var(--line); background: var(--soft); color: var(--ink); }
 .requestFilters span { padding: 1px 5px; border-radius: 4px; background: var(--canvas); font-size: 10px; }
-.app .requestsTableWrap, [data-theme="dark"] .app .requestsTableWrap { border-color: var(--line); border-radius: 9px; background: var(--paper); }
-.app .requestsTable, [data-theme="dark"] .app .requestsTable { min-width: 720px; background: var(--paper); }
+.app .requestsTableWrap, [data-theme="dark"] .app .requestsTableWrap { container: request-list / inline-size; min-width: 0; overflow: visible; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
+.app .requestsTable, [data-theme="dark"] .app .requestsTable { width: 100%; min-width: 0; table-layout: fixed; background: var(--paper); }
+.app .requestsTable th:first-child { width: 36%; }
+.app .requestsTable th:nth-child(2) { width: 18%; }
+.app .requestsTable th:nth-child(3) { width: 21%; }
+.app .requestsTable th:last-child { width: 25%; }
+.app .requestsTable td { min-width: 0; overflow-wrap: anywhere; }
+.app .requestsTable td time { white-space: normal; }
 .app .requestsTable th, [data-theme="dark"] .app .requestsTable th { background: var(--soft); color: var(--muted); font-size: 10px; font-weight: 600; padding: 12px 15px; letter-spacing: .06em; }
 .app .requestsTable td { padding: 18px 15px; font-size: 12px; border-color: var(--line); }
 .requestIdentity { display: flex; gap: 10px; align-items: center; }
@@ -222,7 +239,11 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .auditEntry > * { font-size: 12px; }
 .auditEntry > b { font-weight: 550; }
 .auditTable > .pagination { padding-inline: 15px; }
-.app .pagination { margin-top: 17px; padding-top: 16px; gap: 14px; border-color: var(--line); }
+.app .pagination { display: flex; flex-wrap: wrap; min-width: 0; margin-top: 17px; padding-top: 16px; gap: 14px; border-color: var(--line); }
+.app .pagination > * { min-width: 0; max-width: 100%; }
+.app .paginationSummary { flex: 1 1 150px; }
+.app .paginationControls { flex-wrap: wrap; justify-content: flex-start; }
+.app .paginationSize { flex-wrap: wrap; margin: 0 0 0 auto; white-space: normal; }
 .paginationSummary, .paginationSize { font-size: 11px; color: var(--muted); }
 .app .pagination button, .app .paginationSize select, [data-theme="dark"] .app .pagination button, [data-theme="dark"] .app .paginationSize select { border-radius: 6px; min-height: 29px; height: 29px; padding: 0 9px; font-size: 11px; background: var(--paper); border-color: var(--line); }
 .app .pagination button.current, [data-theme="dark"] .app .pagination button.current { min-width: 29px; background: #176b57; border-color: #176b57; color: white; }
@@ -260,8 +281,13 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .app .ticketHead { font-size: 10px; font-weight: 600; padding-block: 9px; }
 .app .ticketRow, [data-theme="dark"] .app .ticketRow { border-radius: 8px; border-color: var(--line); box-shadow: none; background: var(--paper); }
 .app .ticketRow span:not(.status) { color: var(--ink); font-size: 12px; }
+.app .managerTicketPanel .ticketTable { container: ticket-list / inline-size; min-width: 0; overflow: visible; }
+.app .managerTicketPanel :is(.ticketHead, .ticketRow) { min-width: 0; grid-template-columns: minmax(0, .9fr) minmax(0, 1.25fr) minmax(0, 1.1fr) minmax(0, 1.8fr) minmax(0, 1fr) minmax(0, 1fr); }
+.app .managerTicketPanel :is(.ticketHead, .ticketRow) > * { min-width: 0; overflow-wrap: anywhere; }
+.app .ticketRow > .status { width: fit-content; }
 .ticketReason { font-size: 12px; }
 .activeFilters { display: flex; gap: 12px; justify-content: space-between; align-items: center; padding: 10px 12px; margin-bottom: 18px; background: var(--soft); border: 1px solid var(--line); border-radius: 7px; color: var(--muted); font-size: 12px; }
+.activeFilters > span { min-width: 0; flex: 1 1 160px; }
 .activeFilters button { display: flex; gap: 5px; align-items: center; background: transparent; color: var(--teal); border: 0; font-size: 12px; white-space: nowrap; }
 .app .closureSettings { padding: 23px 26px; }
 .closureSettings h2 { font-size: 16px; font-weight: 600; }
@@ -297,7 +323,7 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .app .modal h2 { margin: 7px 0 12px; font-size: 25px; font-weight: 600; letter-spacing: -.7px; }
 .modalIssue { padding: 17px 19px; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; }
 .app .modalIssue p { margin: 6px 0 0; color: var(--ink); font-size: 14px; }
-.requestMeta { display: grid; grid-template-columns: 1fr 1fr; gap: 17px 20px; margin: 24px 0; }
+.requestMeta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px 20px; margin: 24px 0; }
 .requestMeta dt { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
 .requestMeta dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .app .modal h3 { font-size: 14px; font-weight: 600; margin: 0 0 9px; }
@@ -315,9 +341,29 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .app .history p { font-size: 11px; margin: 7px 0 0; color: var(--muted); }
 .modalFoot { display: flex; align-items: center; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); }
 .app .approvalNotice, .app .unresolvedEscalationNotice { font-size: 12px; padding: 11px 14px; border-radius: 9px; font-weight: 500; }
+/* Tables respond to their actual space beside the sidebar, including at zoom. */
+@container request-list (max-width: 720px) {
+  .app .requestsTable, [data-theme="dark"] .app .requestsTable { display: block; }
+  .app .requestsTable thead { display: none; }
+  .app .requestsTable tbody { display: block; }
+  .app .requestsTable tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; padding: 17px 14px; border-bottom: 1px solid var(--line); }
+  .app .requestsTable tr:last-child { border-bottom: 0; }
+  .app .requestsTable td { display: block; min-width: 0; padding: 0; border: 0; }
+  .app .requestsTable td:first-child, .app .requestsTable td:last-child { grid-column: 1 / -1; }
+  .app .requestsTable td:not(:first-child)::before { display: block; content: attr(data-label); margin-bottom: 6px; color: var(--muted); font-size: 10px; }
+  .app .requestRowActions { justify-content: flex-start; }
+}
+@container ticket-list (max-width: 980px) {
+  .app .managerTicketPanel .ticketHead { display: none; }
+  .app .managerTicketPanel .ticketRow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; padding: 18px; }
+  .app .ticketRow > span { display: block; }
+  .app .ticketRow > span::before { display: block; content: attr(data-label); margin-bottom: 5px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  .app .managerTicketPanel .ticketReason { grid-column: 1 / -1; }
+  .app .ticketRow > .status { background: transparent; color: var(--ink); padding: 0; width: auto; }
+}
 @media (min-width: 1600px) { .app .content { padding-inline: 50px; } .app .appHeader { padding-inline: 50px; } }
 @media (max-width: 1280px) { .app .content { padding: 22px 25px 40px; } .app .appHeader { padding-inline: 25px; gap: 18px; } .dashboardWorkspace { grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; } .quickHelp, .recentActivity { padding: 17px; } .managerStats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 1100px) { .workspaceSidebar { width: 215px; padding-inline: 14px; } .app > .workspaceMain { margin-left: 215px; } .dashboardWorkspace { grid-template-columns: minmax(0, 1fr); } .helpRail { grid-template-columns: 1fr 1fr; } .helpRailNote { grid-column: 1 / -1; } .workspaceBreadcrumb span, .workspaceBreadcrumb > svg { display: none; } .stats { gap: 10px; } .app .stat { padding: 16px 14px; } .app .stat small { font-size: 9px; } .managerColumns { grid-template-columns: 1fr; } .knowledgeFlows { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .workspaceSidebar { width: 215px; padding-inline: 14px; } .app > .workspaceMain { margin-left: 215px; } .dashboardWorkspace { grid-template-columns: minmax(0, 1fr); } .workspaceMain .helpRail { grid-template-columns: repeat(2, minmax(0, 1fr)); } .helpRailNote { grid-column: 1 / -1; } .workspaceBreadcrumb span, .workspaceBreadcrumb > svg { display: none; } .stats { gap: 10px; } .app .stat { padding: 16px 14px; } .app .stat small { font-size: 9px; } .workspaceMain .managerColumns, .workspaceMain .adminGrid { grid-template-columns: minmax(0, 1fr); } .knowledgeFlows { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
   .app > .workspaceMain { margin-left: 0; }
   .workspaceSidebar { width: 260px; transform: translateX(-100%); visibility: hidden; transition: transform .2s ease, visibility .2s; z-index: 51; padding: 25px 18px 18px; }
@@ -332,18 +378,18 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .workspaceBreadcrumb { font-size: 13px; }
   .skipLink { left: 20px; }
   .app .managerTicketPanel .ticketHead { display: none; }
-  .app .managerTicketPanel .ticketRow { min-width: 0; grid-template-columns: 1fr 1fr; gap: 14px 18px; padding: 18px; }
+  .app .managerTicketPanel .ticketRow { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; padding: 18px; }
   .ticketRow > span::before { display: block; content: attr(data-label); margin-bottom: 5px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
   .managerTicketPanel .ticketReason { grid-column: 1 / -1; }
   .app .ticketRow > .status { background: transparent; color: var(--ink); padding: 0; }
   .app .auditHead { display: none; }
-  .app .auditEntry { grid-template-columns: 1fr 1fr; gap: 14px; }
+  .app .auditEntry { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .auditEntry > *::before { font-size: 9px; color: var(--muted); }
   .auditEntry > b { grid-column: 1 / -1; grid-row: 1; }
 }
 @media (max-width: 600px) {
   .app .appHeader { display: flex; flex-wrap: wrap; height: auto; min-height: 68px; gap: 12px; padding: 15px 18px; }
-  .workspaceBreadcrumb { flex: 1; }
+  .workspaceBreadcrumb { flex: 1 1 0; }
   .app .appHeader .search { order: 5; width: 100%; flex-basis: 100%; max-width: none; height: 35px; }
   .headRight { gap: 5px; }
   .headerAvatar { margin-left: 3px; }
@@ -361,7 +407,7 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .app .stat b { font-size: 25px; }
   .app .statIcon { width: 27px; height: 27px; }
   .app .stat small { font-size: 9px; margin-top: 4px; }
-  .helpRail { grid-template-columns: 1fr; gap: 15px; }
+  .workspaceMain .helpRail { grid-template-columns: minmax(0, 1fr); gap: 15px; }
   .helpRailNote { grid-column: auto; }
   .app .cardHead { padding: 17px 15px; }
   .cardHead .title { gap: 8px; }
@@ -369,8 +415,8 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .cardHead .title small { font-size: 10px; }
   .online { font-size: 9px; }
   .app .deviceBar { padding: 10px 15px; gap: 7px; }
-  .app .deviceBar label { font-size: 10px; gap: 6px; }
-  .app .deviceBar select { width: 175px; font-size: 10px; }
+  .app .deviceBar label { flex-wrap: wrap; font-size: 10px; gap: 6px; }
+  .app .deviceBar select { width: min(100%, 175px); font-size: 10px; }
   .deviceBar small { font-size: 9px; }
   .app .assistant.full .chat, [data-theme="dark"] .app .chat { height: 380px; min-height: 280px; padding: 20px 13px; }
   .app .assistant .mini { width: 22px; height: 22px; flex-basis: 22px; }
@@ -393,13 +439,13 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .app .requestsTable, [data-theme="dark"] .app .requestsTable { min-width: 0; display: block; }
   .app .requestsTable thead { display: none; }
   .app .requestsTable tbody { display: block; }
-  .app .requestsTable tr { display: grid; grid-template-columns: 1fr 1fr; padding: 17px 14px; gap: 14px 8px; border-bottom: 1px solid var(--line); }
+  .app .requestsTable tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 17px 14px; gap: 14px 8px; border-bottom: 1px solid var(--line); }
   .app .requestsTable tr:last-child { border-bottom: 0; }
   .app .requestsTable td { display: block; padding: 0; border: 0; }
   .app .requestsTable td:first-child { grid-column: 1 / -1; }
   .app .requestsTable td:last-child { grid-column: 1 / -1; }
   .requestRowActions { justify-content: flex-start; padding-top: 3px; }
-  .requestsTable time { font-size: 10px; white-space: normal; }
+  .app .requestsTable td time { font-size: 10px; white-space: normal; }
   .app .requestsTableWrap { overflow-x: visible; }
   .app .auditEntry { padding: 16px 13px; }
   .managerStats { grid-template-columns: 1fr 1fr; }
@@ -429,5 +475,8 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .requestMeta dd { font-size: 11px; }
   .app .pagination { justify-items: start; }
   .paginationSummary { font-size: 10px; }
+}
+@container ticket-list (max-width: 380px) {
+  .app .managerTicketPanel .ticketRow { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
