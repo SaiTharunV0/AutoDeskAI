@@ -504,9 +504,22 @@ def device_state(device_id: int, payload: DeviceState, user=Depends(require_admi
     db.commit()
     return device
 
-@app.get("/admin/audit", response_model=list[AuditOut], tags=["Admin"])
+@app.get("/admin/audit", response_model=list[AuditRequestOut], tags=["Admin"])
 def audit_logs(user=Depends(require_admin), db: Session = Depends(get_db)):
-    return db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(500)).all()
+    rows = db.execute(select(HelpdeskRequest, User.username).join(
+        User, HelpdeskRequest.user_id == User.id).options(selectinload(HelpdeskRequest.task)).where(
+        User.role == 'employee').order_by(HelpdeskRequest.id.desc()).limit(500)).all()
+    return [AuditRequestOut(**RequestOut.model_validate(request).model_dump(),
+                            username=username or 'Unknown username') for request, username in rows]
+
+@app.get('/admin/audit/requests/{request_id}/history', response_model=list[AuditOut], tags=['Admin'])
+def admin_request_history(request_id: int, user=Depends(require_admin), db: Session = Depends(get_db)):
+    request = db.scalar(select(HelpdeskRequest).join(User).where(
+        HelpdeskRequest.id == request_id, User.role == 'employee'))
+    if not request:
+        raise HTTPException(404, 'Request not found')
+    return db.scalars(select(AuditLog).where(AuditLog.resource_type == 'request',
+        AuditLog.resource_id == request_id).order_by(AuditLog.id)).all()
 
 @app.get("/catalog", tags=["Requests"])
 def catalog(user=Depends(get_current_user), db: Session = Depends(get_db)):

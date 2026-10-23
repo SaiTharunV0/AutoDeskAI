@@ -4,6 +4,8 @@ import App from './App.jsx';
 import './index.css';
 import './theme.css';
 import './dark.css';
+import './workspace.css';
+import './auth-refresh.css';
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode><App/></React.StrictMode>

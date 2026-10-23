@@ -397,7 +397,7 @@ input::placeholder { color: #8498ad; }
 .auditTable { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
 .auditHead { color: #6a7f98; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .auditHead, .auditEntry {
-  display: grid; grid-template-columns: 1.3fr 1.2fr .8fr .7fr; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: 1.15fr 1.5fr .9fr .9fr .8fr; align-items: center; gap: 12px;
 }
 .auditEntry {
   padding: 10px; border: 1px solid #ebf1f8; border-radius: 10px; background: #fbfdff;
@@ -631,3 +631,6 @@ input::placeholder { color: #8498ad; }
 .chat .ticketCloseChoices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .chat .ticketCloseChoices button { margin: 0; }
 .chat .bubble p { margin: 8px 0; }
+
+.auditViewButton { border: 1px solid #147a68; border-radius: 8px; padding: 7px 10px; background: #e8f5f1; color: #126c5d; font-weight: 700; cursor: pointer; }
+.auditViewButton:hover { background: #d8eee7; }

@@ -497,6 +497,28 @@ class WorkflowTests(unittest.TestCase):
                 ChatRateLimitBucket.user_id == self.employee['user']['id'],
                 ChatRateLimitBucket.bucket_type == 'out_of_scope_minute')), 3)
 
+    def test_admin_audit_lists_employee_requests_with_usernames_and_history(self):
+        password = self.request(Intent.PASSWORD_RESET, 'forgot password').json()
+        self.client.post(f"/requests/{password['id']}/resolution", headers=self.headers(),
+                         json={'resolved': True})
+        rejected = self.request(Intent.ACCESS_REQUEST,
+                                'how can i request access to youtube', application='unknown').json()
+        with self.sessions() as db:
+            db.add(HelpdeskRequest(user_id=self.admin['user']['id'], intent='ACCESS_REQUEST',
+                status='CLOSED', message='Admin request', idempotency_key=secrets.token_hex(16)))
+            db.commit()
+        self.assertEqual(self.client.get('/admin/audit', headers=self.headers()).status_code, 403)
+        rows = self.client.get('/admin/audit', headers=self.headers(self.admin)).json()
+        self.assertEqual({row['id'] for row in rows}, {password['id'], rejected['id']})
+        self.assertTrue(all(row['username'] == 'employee' for row in rows))
+        self.assertEqual(next(row for row in rows if row['id'] == password['id'])['resolved'], True)
+        self.assertIn('not authorised', next(row for row in rows if row['id'] == rejected['id'])['message'])
+        path = f"/admin/audit/requests/{password['id']}/history"
+        self.assertEqual(self.client.get(path, headers=self.headers()).status_code, 403)
+        history = self.client.get(path, headers=self.headers(self.admin)).json()
+        self.assertIn('TICKET_CLOSED_BY_EMPLOYEE', [event['action'] for event in history])
+        self.assertTrue(all(event['resource_id'] == password['id'] for event in history))
+
     def test_request_status_chat_only_reads_own_requests(self):
         row = self.request(Intent.PASSWORD_RESET, 'forgot password').json()
         self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),

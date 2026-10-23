@@ -112,6 +112,9 @@ class RequestOut(BaseModel):
     updated_at: datetime
     task: TaskOut | None
 
+class AuditRequestOut(RequestOut):
+    username: str
+
 class ChatOut(BaseModel):
     id: None = None
     intent: Literal["CHAT"] = "CHAT"
