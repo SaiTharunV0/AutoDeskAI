@@ -214,20 +214,22 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .requestFilters span { padding: 1px 5px; border-radius: 4px; background: var(--canvas); font-size: 10px; }
 .app .requestsTableWrap, [data-theme="dark"] .app .requestsTableWrap { container: request-list / inline-size; min-width: 0; overflow: visible; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
 .app .requestsTable, [data-theme="dark"] .app .requestsTable { width: 100%; min-width: 0; table-layout: fixed; background: var(--paper); }
-.app .requestsTable th:first-child { width: 36%; }
-.app .requestsTable th:nth-child(2) { width: 18%; }
-.app .requestsTable th:nth-child(3) { width: 21%; }
-.app .requestsTable th:last-child { width: 25%; }
+.app .requestsTable th:first-child { width: 32%; }
+.app .requestsTable th:nth-child(2) { width: 13%; }
+.app .requestsTable th:nth-child(3) { width: 19%; }
+.app .requestsTable th:nth-child(4) { width: 20%; }
+.app .requestsTable th:last-child { width: 16%; }
+.app .requestsTable th, .app .requestsTable td { text-align: center; }
 .app .requestsTable td { min-width: 0; overflow-wrap: anywhere; }
 .app .requestsTable td time { white-space: normal; }
 .app .requestsTable th, [data-theme="dark"] .app .requestsTable th { background: var(--soft); color: var(--muted); font-size: 10px; font-weight: 600; padding: 12px 15px; letter-spacing: .06em; }
 .app .requestsTable td { padding: 18px 15px; font-size: 12px; border-color: var(--line); }
-.requestIdentity { display: flex; gap: 10px; align-items: center; }
+.requestIdentity { display: flex; justify-content: center; gap: 10px; align-items: center; text-align: center; }
 .requestIdentity .reqIcon { width: 31px; height: 31px; border-radius: 8px; background: var(--soft); color: var(--teal); flex: 0 0 auto; }
 .requestIdentity > div { min-width: 0; overflow-wrap: anywhere; }
 .requestIdentity b { display: block; font-size: 12px; font-weight: 600; }
-.requestIdentity small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 4px; max-width: 300px; }
-.requestRowActions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.requestIdentity small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin: 4px auto 0; max-width: 300px; }
+.requestRowActions { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
 .detailsLink { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: 0; color: var(--teal); font-size: 11px; font-weight: 600; white-space: nowrap; }
 .app .requestAction, .app .auditViewButton, .app .closeTicketButton { background: var(--soft); color: var(--teal-dark); border-color: var(--line); font-size: 11px; font-weight: 600; border-radius: 7px; min-height: 32px; }
 .app .status { max-width: 100%; border-radius: 5px; font-size: 10px; line-height: 1.4; padding: 4px 7px; font-weight: 600; letter-spacing: 0; text-transform: none; }
@@ -289,6 +291,9 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .activeFilters { display: flex; gap: 12px; justify-content: space-between; align-items: center; padding: 10px 12px; margin-bottom: 18px; background: var(--soft); border: 1px solid var(--line); border-radius: 7px; color: var(--muted); font-size: 12px; }
 .activeFilters > span { min-width: 0; flex: 1 1 160px; }
 .activeFilters button { display: flex; gap: 5px; align-items: center; background: transparent; color: var(--teal); border: 0; font-size: 12px; white-space: nowrap; }
+.ticketActions { display: flex; flex-wrap: wrap; gap: 7px; }
+.rejectTicketButton { border: 1px solid #d8ada5; border-radius: 7px; padding: 7px 10px; background: #fff1ef; color: #963d29; font-size: 11px; font-weight: 600; cursor: pointer; }
+[data-theme="dark"] .rejectTicketButton { border-color: #8d544c; background: #4d302b; color: #ffd1c8; }
 .app .closureSettings { padding: 23px 26px; }
 .closureSettings h2 { font-size: 16px; font-weight: 600; }
 .closureSettings p { font-size: 12px; }
@@ -349,9 +354,8 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .app .requestsTable tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; padding: 17px 14px; border-bottom: 1px solid var(--line); }
   .app .requestsTable tr:last-child { border-bottom: 0; }
   .app .requestsTable td { display: block; min-width: 0; padding: 0; border: 0; }
-  .app .requestsTable td:first-child, .app .requestsTable td:last-child { grid-column: 1 / -1; }
+  .app .requestsTable td:first-child, .app .requestsTable td:nth-child(4), .app .requestsTable td:last-child { grid-column: 1 / -1; }
   .app .requestsTable td:not(:first-child)::before { display: block; content: attr(data-label); margin-bottom: 6px; color: var(--muted); font-size: 10px; }
-  .app .requestRowActions { justify-content: flex-start; }
 }
 @container ticket-list (max-width: 980px) {
   .app .managerTicketPanel .ticketHead { display: none; }
@@ -442,9 +446,9 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .app .requestsTable tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 17px 14px; gap: 14px 8px; border-bottom: 1px solid var(--line); }
   .app .requestsTable tr:last-child { border-bottom: 0; }
   .app .requestsTable td { display: block; padding: 0; border: 0; }
-  .app .requestsTable td:first-child { grid-column: 1 / -1; }
+  .app .requestsTable td:first-child, .app .requestsTable td:nth-child(4) { grid-column: 1 / -1; }
   .app .requestsTable td:last-child { grid-column: 1 / -1; }
-  .requestRowActions { justify-content: flex-start; padding-top: 3px; }
+  .requestRowActions { padding-top: 3px; }
   .app .requestsTable td time { font-size: 10px; white-space: normal; }
   .app .requestsTableWrap { overflow-x: visible; }
   .app .auditEntry { padding: 16px 13px; }

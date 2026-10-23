@@ -73,6 +73,7 @@ def upgrade_application_access(db_engine=engine):
         'helpdesk_requests': {
             'resolved': 'BOOLEAN',
             'resolution_reporter': 'VARCHAR(20)',
+            'rejection_source': 'VARCHAR(20)',
             'resolution_attempts': 'INTEGER NOT NULL DEFAULT 0',
         },
     }
@@ -84,3 +85,13 @@ def upgrade_application_access(db_engine=engine):
                     connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {definition}'))
         connection.execute(text("UPDATE application_policies SET display_name = 'Tableau (example)' WHERE key = 'tableau' AND display_name = ''"))
         connection.execute(text("UPDATE application_policies SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
+        request_columns = {column['name'] for column in inspect(connection).get_columns('helpdesk_requests')}
+        if {'status', 'message'} <= request_columns:
+            connection.execute(text("""UPDATE helpdesk_requests SET rejection_source =
+                CASE WHEN EXISTS (SELECT 1 FROM access_requests
+                    WHERE access_requests.request_id = helpdesk_requests.id
+                    AND access_requests.status = 'REJECTED'
+                    AND access_requests.approver_id IS NOT NULL)
+                THEN 'ADMIN' ELSE 'AUTODESKAI' END
+                WHERE status = 'CLOSED' AND rejection_source IS NULL
+                AND message LIKE '%I have closed this ticket; no confirmation is needed.%'"""))

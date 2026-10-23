@@ -16,7 +16,7 @@ from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profil
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS
-from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections
+from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections, reject_pending_software_requests
 from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, correct_legacy_access_requests
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
@@ -34,6 +34,7 @@ async def lifespan(app):
         correct_legacy_password_requests(db)
         correct_legacy_access_requests(db)
         close_legacy_rejections(db)
+        reject_pending_software_requests(db)
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
@@ -250,10 +251,8 @@ def employee_close_ticket(request_id: int, payload: TicketCloseIn, user=Depends(
             resolution_attempts=request.resolution_attempts or 0, message='Ticket closed as resolved. You can continue with another request.')
     else:
         request.resolution_attempts = (request.resolution_attempts or 0) + 1
-        can_retry = ((request.intent in ('PASSWORD_CHANGE', 'PASSWORD_RESET')
-                      and request.status == 'AWAITING_USER_ACTION')
-                     or (request.intent == 'SOFTWARE_INSTALL' and request.task
-                         and request.task.status in ('COMPLETED', 'FAILED')))
+        can_retry = (request.intent in ('PASSWORD_CHANGE', 'PASSWORD_RESET')
+                     and request.status == 'AWAITING_USER_ACTION')
         escalated = (request.resolution_attempts > 1 or not can_retry)
         if escalated:
             request.status = 'AWAITING_ADMIN'
@@ -276,26 +275,10 @@ def employee_close_ticket(request_id: int, payload: TicketCloseIn, user=Depends(
 
 @app.post('/requests/{request_id}/retry-action', response_model=RequestOut, tags=['Requests'])
 def retry_employee_action(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
-    request = db.scalar(select(HelpdeskRequest).where(
-        HelpdeskRequest.id == request_id, HelpdeskRequest.user_id == user.id
-    ).options(selectinload(HelpdeskRequest.task)).with_for_update())
-    if not request:
+    request = db.get(HelpdeskRequest, request_id)
+    if not request or request.user_id != user.id:
         raise HTTPException(404, 'Request not found')
-    if (request.intent != 'SOFTWARE_INSTALL' or request.resolution_attempts != 1
-            or request.status != 'RETRY_ACTION_REQUIRED'
-            or not request.task or request.task.status not in ('COMPLETED', 'FAILED')):
-        raise HTTPException(409, 'This action cannot be retried right now')
-    task = request.task
-    task.status = 'PENDING'
-    task.result = None
-    task.started_at = None
-    task.completed_at = None
-    request.status = 'PENDING'
-    request.message = 'Employee asked to retry the same approved software installation.'
-    audit(db, user.id, 'SOFTWARE_INSTALL_RETRIED_BY_EMPLOYEE', 'request', request.id,
-          'PENDING', f'Attempt {request.resolution_attempts + 1}')
-    db.commit()
-    return request
+    raise HTTPException(409, 'Software installation is not implemented yet')
 
 @app.get("/requests/{request_id}/history", response_model=list[AuditOut], tags=["Requests"])
 def history(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
@@ -487,6 +470,24 @@ def close_ticket(request_id: int, user=Depends(require_admin), db: Session = Dep
         audit(db, user.id, 'TICKET_CLOSED_BY_ADMIN', 'request', request.id, 'COMPLETED')
     else:
         raise HTTPException(409, 'This ticket is not awaiting administrator closure')
+    db.commit()
+    return request
+
+@app.post('/admin/requests/{request_id}/reject', response_model=RequestOut, tags=['Admin'])
+def reject_escalated_ticket(request_id: int, payload: TicketRejectIn,
+                            user=Depends(require_admin), db: Session = Depends(get_db)):
+    request = db.scalar(select(HelpdeskRequest).where(HelpdeskRequest.id == request_id).with_for_update())
+    if not request:
+        raise HTTPException(404, 'Request not found')
+    if request.status != 'AWAITING_ADMIN' or request.resolved is not False:
+        raise HTTPException(409, 'This ticket is not awaiting an administrator decision')
+    reason = payload.reason.strip()
+    if len(reason) < 5:
+        raise HTTPException(422, 'Enter a rejection reason of at least 5 characters')
+    request.status = 'REJECTED'
+    request.message = f'An administrator rejected this escalated request. {reason}'[:440]
+    audit(db, user.id, 'TICKET_REJECTED_BY_ADMIN', 'request', request.id, 'REJECTED', reason)
+    close_rejected_request(db, request, source='ADMIN')
     db.commit()
     return request
 

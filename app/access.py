@@ -180,7 +180,7 @@ def decide_access(db, access_id, admin, decision, reason):
     audit(db, admin.id, 'ACCESS_ADMIN_APPROVED' if decision == 'APPROVE' else 'ACCESS_ADMIN_REJECTED',
           'request', access.request_id, status, reason.strip())
     from app.workflows import close_rejected_request
-    close_rejected_request(db, access.request)
+    close_rejected_request(db, access.request, source='ADMIN')
     db.commit()
     return access
 

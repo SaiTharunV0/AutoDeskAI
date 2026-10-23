@@ -5,7 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from app.models import (HelpdeskRequest, SoftwareTask, AccessRequest, AuditLog, Device,
                         SoftwarePolicy, ApplicationPolicy, now)
-from app.catalog import SOFTWARE, APPLICATIONS, software_key
+from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS, software_key
 from app.schemas import ChatOut
 from schema import AgentResponse, Intent
 from agent import process_request, safe_message, UnsafeRequest
@@ -16,13 +16,14 @@ def audit(db, user_id, action, resource_type, resource_id, status, details=""):
     db.add(AuditLog(user_id=user_id, action=action, resource_type=resource_type,
                     resource_id=resource_id, status=status, details=details))
 
-def close_rejected_request(db, request):
+def close_rejected_request(db, request, source='AUTODESKAI'):
     """Keep the decision in history without asking employees to confirm a denial."""
     if request.status != 'REJECTED':
         return
     request.status = 'CLOSED'
     request.resolved = None
     request.resolution_reporter = None
+    request.rejection_source = source
     request.message = request.message[:440] + ' I have closed this ticket; no confirmation is needed.'
     audit(db, request.user_id, 'REJECTED_TICKET_CLOSED', 'request', request.id,
           'CLOSED', 'Rejected automatically; no employee resolution reported')
@@ -30,8 +31,27 @@ def close_rejected_request(db, request):
 
 def close_legacy_rejections(db):
     for request in db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.status == 'REJECTED')):
-        close_rejected_request(db, request)
+        source = 'ADMIN' if request.access and request.access.approver_id else 'AUTODESKAI'
+        close_rejected_request(db, request, source)
     db.commit()
+
+
+def reject_pending_software_requests(db):
+    """Stop unfinished simulated installations while the workflow is unavailable."""
+    rows = db.scalars(select(HelpdeskRequest).options(selectinload(HelpdeskRequest.task)).where(
+        HelpdeskRequest.intent == 'SOFTWARE_INSTALL',
+        HelpdeskRequest.status.in_(('PENDING', 'PROCESSING', 'RETRY_ACTION_REQUIRED')))).all()
+    for request in rows:
+        if request.task and request.task.status in ('PENDING', 'PROCESSING'):
+            request.task.status = 'REJECTED'
+            request.task.result = 'Software installation is not implemented yet.'
+        request.status = 'REJECTED'
+        request.message = "Software installation isn't implemented yet, so I can't install software for you right now."
+        audit(db, request.user_id, 'SOFTWARE_INSTALL_REJECTED', 'request', request.id,
+              'REJECTED', 'Unfinished simulation closed after workflow disabled')
+        close_rejected_request(db, request)
+    if rows:
+        db.commit()
 
 
 def owned_request(db, request_id, user):
@@ -100,16 +120,33 @@ def create_workflow(db, user, payload):
             db.commit()
             raise HTTPException(429, "Too many password requests. Try again later.")
     previous = None
+    clarification_application = None
     if payload.previous_request_id:
         prior = owned_request(db, payload.previous_request_id, user)
         if prior.user_id != user.id or prior.status != "NEEDS_CLARIFICATION":
             raise HTTPException(409, "Previous request is not awaiting clarification")
         previous = AgentResponse(intent=Intent.CLARIFICATION, message=prior.message)
+        if 'which application' in prior.message.lower():
+            answer = ' '.join(payload.message.lower().strip().split()).strip(' .?!')
+            policies = db.scalars(select(ApplicationPolicy)).all()
+            names = {key: {display.lower()} for key, display in
+                     {**APPLICATIONS, **EXAMPLE_APPLICATIONS}.items()}
+            for policy in policies:
+                names.setdefault(policy.key, set()).update((policy.key,
+                    policy.display_name.lower().removesuffix(' (example)')))
+            clarification_application = next((key for key, aliases in names.items()
+                if any(answer in (alias, f'access to {alias}', f'i need access to {alias}')
+                       for alias in aliases)), None)
+            if not clarification_application:
+                return ChatOut(message=f"Let's finish your current access request first. {prior.message}")
+            safe = f'access {clarification_application}'
     # All work so far is read-only. Return the pooled connection while the model
     # runs; a slow model call should not monopolize a PostgreSQL connection.
     db.commit()
     try:
-        result = process_request(payload.message, previous)
+        result = (AgentResponse(intent=Intent.ACCESS_REQUEST, application=clarification_application,
+                                message='Access request identified.') if clarification_application
+                  else process_request(payload.message, previous))
     except RuntimeError:
         audit(db, user.id, "AI_REQUEST_FAILED", "service", None, "FAILED", "AI unavailable or malformed output")
         db.commit()
@@ -122,17 +159,26 @@ def create_workflow(db, user, payload):
         rows = db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.user_id == user.id)
                           .order_by(HelpdeskRequest.id.desc()).limit(10)).all()
         if not rows:
-            return ChatOut(message="You don’t have any requests yet. I can help with organization password change/reset, approved software installation, or application access.")
+            return ChatOut(message="You don’t have any requests yet. I can help with organization password change/reset and application access. Software installation is not implemented yet.")
         lines = [f"#{row.id} · {row.intent.replace('_', ' ').title()} · {row.status.replace('_', ' ').title()}"
                  for row in rows]
         return ChatOut(message="Your 10 most recent request statuses:\n" + "\n".join(lines))
     if result.intent == Intent.CHAT:
         return ChatOut(message=result.message)
-    request = HelpdeskRequest(user_id=user.id, intent=result.intent.value,
-                              original_message=safe[:200], idempotency_key=payload.idempotency_key)
-    db.add(request)
-    db.flush()
-    if previous:
+    if previous and result.intent == Intent.CLARIFICATION:
+        return ChatOut(message=f"Let's finish your current request first. {prior.message}")
+    if clarification_application:
+        request = prior
+        request.intent = result.intent.value
+        request.original_message = safe[:200]
+        audit(db, user.id, 'CLARIFICATION_ANSWERED', 'request', request.id,
+              request.status, 'Application identified')
+    else:
+        request = HelpdeskRequest(user_id=user.id, intent=result.intent.value,
+                                  original_message=safe[:200], idempotency_key=payload.idempotency_key)
+        db.add(request)
+        db.flush()
+    if previous and not clarification_application:
         prior.status = 'CLOSED'
         prior.message = (prior.message + f' Clarification received; follow-up ticket #{request.id} opened.')[:500]
         audit(db, user.id, 'CLARIFICATION_FOLLOWUP_CREATED', 'request', prior.id, 'CLOSED',
@@ -145,21 +191,10 @@ def create_workflow(db, user, payload):
                           "When you return, let me know whether it worked. I can't check the result at Microsoft."
         audit(db, user.id, result.intent.value + "_REQUESTED", "request", request.id, request.status)
     elif result.intent == Intent.SOFTWARE_INSTALL:
-        key = software_key(result.software)
-        policy = db.get(SoftwarePolicy, key) if key else None
-        # Even a fabricated model response cannot select a target absent from input.
-        if not key or key not in safe.split() or not policy or not policy.enabled:
-            request.status, request.message = "REJECTED", "This software is not authorised for installation through AutoDeskAI."
-        else:
-            device = db.get(Device, payload.device_id) if payload.device_id else None
-            if not device or device.owner_user_id != user.id or device.status != "ACTIVE":
-                request.status, request.message = "REJECTED", "I couldn't start the installation because no active device was selected. Please select a device registered to your account and try again."
-            elif device.last_seen < now() - timedelta(seconds=config.DEVICE_OFFLINE_SECONDS):
-                request.status, request.message = "FAILED", "Your device appears to be offline. Please start its agent, then try the installation again."
-            else:
-                request.status, request.message = "PENDING", "I've queued the approved installation for your device. I'll update you when its agent reports back."
-                db.add(SoftwareTask(request_id=request.id, device_id=device.id, software=key))
-        audit(db, user.id, "SOFTWARE_INSTALL_REQUESTED", "request", request.id, request.status)
+        request.status = 'REJECTED'
+        request.message = "Software installation isn't implemented yet, so I can't install software for you right now."
+        audit(db, user.id, 'SOFTWARE_INSTALL_REJECTED', 'request', request.id,
+              request.status, 'Installation workflow unavailable; no task created')
     elif result.intent == Intent.ACCESS_REQUEST:
         key = (result.application or "").strip().lower()
         policy = db.get(ApplicationPolicy, key) if key in safe.split() else None

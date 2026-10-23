@@ -107,6 +107,7 @@ class RequestOut(BaseModel):
     message: str
     resolved: bool | None = None
     resolution_reporter: str | None = None
+    rejection_source: str | None = None
     resolution_attempts: int = 0
     created_at: datetime
     updated_at: datetime
@@ -232,6 +233,9 @@ class TicketClosureSettingIn(Input):
 
 class TicketCloseIn(Input):
     resolved: bool
+
+class TicketRejectIn(Input):
+    reason: str = Field(min_length=5, max_length=200)
 
 class TicketResolutionOut(BaseModel):
     request_id: int

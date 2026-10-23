@@ -187,6 +187,7 @@ class WorkflowTests(unittest.TestCase):
         row = self.request(Intent.ACCESS_REQUEST, 'how can i request access to youtube', application='unknown').json()
         self.assertEqual(row['status'], 'CLOSED')
         self.assertIsNone(row['resolved'])
+        self.assertEqual(row['rejection_source'], 'AUTODESKAI')
         self.assertIn('not authorised', row['message'])
         self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
             json={'resolved': True}).status_code, 409)
@@ -205,6 +206,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(access.status, 'REJECTED')
             self.assertEqual(access.request.status, 'CLOSED')
             self.assertIsNone(access.request.resolved)
+            self.assertEqual(access.request.rejection_source, 'ADMIN')
         self.assertEqual(self.request(Intent.PASSWORD_RESET, 'forgot password').status_code, 201)
 
     def test_confirmation_blocks_new_chat_and_access_requests(self):
@@ -228,6 +230,7 @@ class WorkflowTests(unittest.TestCase):
             close_legacy_rejections(db)
             self.assertEqual(row.status, 'CLOSED')
             self.assertIsNone(row.resolved)
+            self.assertEqual(row.rejection_source, 'AUTODESKAI')
             self.assertEqual(len(db.scalars(select(AuditLog).where(
                 AuditLog.resource_id == row.id, AuditLog.action == 'REJECTED_TICKET_CLOSED')).all()), 1)
 
@@ -386,33 +389,60 @@ class WorkflowTests(unittest.TestCase):
             correct_legacy_access_requests(db)
             self.assertEqual(request.status, 'APPROVED_PROVISIONING_REQUIRED')
             self.assertEqual(request.access.provisioning_status, 'SIMULATED')
-    def test_software_agent_end_to_end(self):
+    def test_software_installation_is_rejected_without_dispatch(self):
         device = self.enroll()
         row = self.request(Intent.SOFTWARE_INSTALL, "Install VS Code", software="vscode",
                            device_id=device["device"]["id"]).json()
-        self.assertEqual(row["status"], "PENDING")
-        client = self.client
-        headers = device["headers"]
-        class API:
-            def heartbeat(self): return client.get("/agent/heartbeat",headers=headers).json()
-            def tasks(self): return client.get("/agent/tasks",headers=headers).json()
-            def report(self, task_id, result):
-                response = client.post(f"/agent/tasks/{task_id}/result",headers=headers,json=result)
-                assert response.status_code == 200, response.text
-        run_once(API(), "test-one")
-        final = self.client.get(f'/requests/{row["id"]}',headers=self.headers()).json()
-        self.assertEqual(final["status"], "COMPLETED")
-        self.assertIn("Simulated", final["message"])
-        self.assertEqual(self.client.get("/agent/tasks",headers=headers).json(), [])
-    def test_device_isolation_and_result_state(self):
-        first, second = self.enroll(), self.enroll("two")
-        row = self.request(Intent.SOFTWARE_INSTALL,"install vscode",software="vscode",device_id=first["device"]["id"]).json()
-        task_id = row["task"]["id"]
-        self.assertEqual(self.client.post(f"/agent/tasks/{task_id}/result",headers=first["headers"],
-            json={"success":True}).status_code,409)
-        self.assertEqual(self.client.post(f"/agent/tasks/{task_id}/result",headers=second["headers"],
-            json={"success":True}).status_code,404)
-        self.assertEqual(self.client.get("/agent/tasks",headers=self.headers()).status_code,401)
+        self.assertEqual(row['status'], 'CLOSED')
+        self.assertEqual(row['rejection_source'], 'AUTODESKAI')
+        self.assertIn("isn't implemented yet", row['message'])
+        self.assertIsNone(row['task'])
+        self.assertIsNone(row['resolved'])
+        self.assertEqual(self.client.get('/agent/tasks', headers=device['headers']).json(), [])
+        self.assertEqual(self.client.post(f"/requests/{row['id']}/retry-action",
+            headers=self.headers()).status_code, 409)
+        self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution",
+            headers=self.headers(), json={'resolved': True}).status_code, 409)
+
+    def test_unfinished_software_installation_is_closed_on_startup(self):
+        from app.workflows import reject_pending_software_requests
+        with self.sessions() as db:
+            row = HelpdeskRequest(user_id=self.employee['user']['id'], intent='SOFTWARE_INSTALL',
+                status='PENDING', message='Old simulation', idempotency_key=secrets.token_hex(16))
+            db.add(row)
+            db.flush()
+            db.add(SoftwareTask(request_id=row.id, device_id=self.enroll()['device']['id'],
+                software='vscode', status='PENDING'))
+            db.commit()
+            reject_pending_software_requests(db)
+            reject_pending_software_requests(db)
+            self.assertEqual(row.status, 'CLOSED')
+            self.assertEqual(row.rejection_source, 'AUTODESKAI')
+            self.assertEqual(row.task.status, 'REJECTED')
+            self.assertEqual(len(db.scalars(select(AuditLog).where(
+                AuditLog.resource_id == row.id, AuditLog.action == 'REJECTED_TICKET_CLOSED')).all()), 1)
+
+    def test_admin_can_reject_escalated_issue(self):
+        with self.sessions() as db:
+            row = HelpdeskRequest(user_id=self.employee['user']['id'], intent='PASSWORD_RESET',
+                status='AWAITING_ADMIN', resolved=False, message='Still unable to sign in',
+                idempotency_key=secrets.token_hex(16))
+            db.add(row)
+            db.commit()
+            request_id = row.id
+        url = f'/admin/requests/{request_id}/reject'
+        self.assertEqual(self.client.post(url, headers=self.headers(),
+            json={'reason': 'Access cannot be granted'}).status_code, 403)
+        self.assertEqual(self.client.post(url, headers=self.headers(self.admin),
+            json={'reason': 'No'}).status_code, 422)
+        rejected = self.client.post(url, headers=self.headers(self.admin),
+            json={'reason': 'The requested action is not authorised'}).json()
+        self.assertEqual(rejected['status'], 'CLOSED')
+        self.assertEqual(rejected['rejection_source'], 'ADMIN')
+        self.assertIsNone(rejected['resolved'])
+        self.assertIn('not authorised', rejected['message'])
+        self.assertEqual(self.client.post(url, headers=self.headers(self.admin),
+            json={'reason': 'A different reason'}).status_code, 409)
     def test_unapproved_software_and_invalid_device(self):
         self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install malware",software="malware").json()["status"],"CLOSED")
         self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install vscode",software="vscode",device_id=999).json()["status"],"CLOSED")
@@ -543,16 +573,6 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn('only with', response.json()['message'])
             model.assert_not_called()
-    def test_timeout(self):
-        from datetime import timedelta
-        device=self.enroll()
-        row=self.request(Intent.SOFTWARE_INSTALL,"install vscode",software="vscode",device_id=device["device"]["id"]).json()
-        with self.sessions() as db:
-            db.get(SoftwareTask,row["task"]["id"]).created_at=now()-timedelta(hours=1)
-            db.commit()
-        final=self.client.get(f'/requests/{row["id"]}',headers=self.headers()).json()
-        self.assertEqual(final["status"],"FAILED")
-
     def test_disabled_and_offline_device(self):
         from datetime import timedelta
         device = self.enroll()
@@ -560,7 +580,7 @@ class WorkflowTests(unittest.TestCase):
             db.get(Device, device['device']['id']).last_seen = now()-timedelta(hours=1)
             db.commit()
         self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,'install vscode',software='vscode',
-            device_id=device['device']['id']).json()['status'],'FAILED')
+            device_id=device['device']['id']).json()['status'],'CLOSED')
         self.client.patch('/admin/devices/'+str(device['device']['id']),headers=self.headers(self.admin),
                           json={'status':'DISABLED'})
         self.assertEqual(self.client.get('/agent/heartbeat',headers=device['headers']).status_code,401)
@@ -589,7 +609,29 @@ class WorkflowTests(unittest.TestCase):
                 'message':'Tableau','previous_request_id':row['id'],'idempotency_key':'stolen-context'})
             self.assertEqual(response.status_code,404)
             ai.assert_not_called()
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST,'access unknown',application='tableau',previous_request_id=row['id']).json()['status'],'CLOSED')
+        with self.sessions() as db:
+            db.add(ApplicationPolicy(key='powerbi', display_name='Power BI (example)'))
+            db.commit()
+        refused = self.client.post('/requests', headers=self.headers(), json={
+            'message':'Please install Visual Studio Code', 'previous_request_id':row['id'],
+            'idempotency_key':secrets.token_hex(16)}).json()
+        self.assertEqual(refused['intent'], 'CHAT')
+        self.assertIn('finish your current access request', refused['message'])
+        self.assertEqual(self.client.get(f"/requests/{row['id']}", headers=self.headers()).json()['status'],
+                         'NEEDS_CLARIFICATION')
+        self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), 1)
+        answered = self.client.post('/requests', headers=self.headers(), json={
+            'message':'Power BI', 'previous_request_id':row['id'],
+            'idempotency_key':secrets.token_hex(16)}).json()
+        self.assertEqual(answered['id'], row['id'])
+        self.assertEqual(answered['intent'], 'ACCESS_REQUEST')
+        self.assertEqual(answered['status'], 'AWAITING_ADMIN')
+        with self.sessions() as db:
+            self.assertEqual(db.scalar(select(AccessRequest).where(
+                AccessRequest.request_id == answered['id'])).application, 'powerbi')
+        self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), 1)
+        self.assertEqual(self.client.post('/requests', headers=self.headers(), json={
+            'message':'I forgot my password', 'idempotency_key':secrets.token_hex(16)}).status_code, 409)
 
     def test_password_hash_and_no_credentials_in_audits(self):
         with self.sessions() as db:

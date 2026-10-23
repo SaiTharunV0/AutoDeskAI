@@ -19,5 +19,5 @@ test('busy processing and Retry-After disable duplicate sends and show rate feed
 test('composer advertises only the implemented helpdesk scope', () => {
   assert.match(chatComposerState('', false).hint, /password change\/reset/);
   assert.match(chatComposerState('', false).hint, /request statuses/);
-  assert.match(chatComposerState('', false).hint, /out of scope/);
+  assert.match(chatComposerState('', false).hint, /installation is not implemented yet/);
 });
