@@ -191,6 +191,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNone(row['resolved'])
         self.assertEqual(row['rejection_source'], 'AUTODESKAI')
         self.assertIn('not authorised', row['message'])
+        notices = self.client.get('/notifications', headers=self.headers()).json()
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0]['kind'], 'ACCESS_REJECTED')
+        self.assertEqual(notices[0]['request_id'], row['id'])
         self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
             json={'resolved': True}).status_code, 409)
         self.assertEqual(self.request(Intent.PASSWORD_RESET, 'forgot password').status_code, 201)

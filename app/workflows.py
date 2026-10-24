@@ -3,7 +3,7 @@ import json
 from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
-from app.models import (HelpdeskRequest, SoftwareTask, AccessRequest, AuditLog, Device,
+from app.models import (HelpdeskRequest, SoftwareTask, AccessRequest, AuditLog, Device, UserNotification,
                         SoftwarePolicy, ApplicationPolicy, now)
 from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS, software_key
 from app.schemas import ChatOut
@@ -201,6 +201,9 @@ def create_workflow(db, user, payload):
         if not policy or not policy.enabled or (policy.required_role == 'admin' and user.role != 'admin'):
             request.status, request.message = 'REJECTED', "This application is not authorised for access through AutoDeskAI, so I can't grant access to it."
             audit(db, user.id, 'ACCESS_REJECTED', 'request', request.id, request.status)
+            db.add(UserNotification(user_id=user.id, request_id=request.id,
+                kind='ACCESS_REJECTED', title='Application access rejected',
+                message='This application is not authorised for access through AutoDeskAI. Your request was rejected and closed.'))
         else:
             from app.access import submit_access
             role = json.loads(policy.requestable_roles_json)[0]
