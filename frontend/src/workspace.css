@@ -346,6 +346,22 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .app .history p { font-size: 11px; margin: 7px 0 0; color: var(--muted); }
 .modalFoot { display: flex; align-items: center; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); }
 .app .approvalNotice, .app .unresolvedEscalationNotice { font-size: 12px; padding: 11px 14px; border-radius: 9px; font-weight: 500; }
+.employeeNotifications { position: relative; }
+.notificationPanel { position: absolute; z-index: 40; top: calc(100% + 15px); right: -42px; width: min(390px, calc(100vw - 32px)); max-height: min(520px, calc(100vh - 110px)); overflow-y: auto; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 45px #102b2130; }
+.notificationPanelHead { display: flex; align-items: center; justify-content: space-between; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+.notificationPanelHead b { font-size: 14px; }
+.notificationPanelHead button { display: grid; place-items: center; padding: 3px; border: 0; color: var(--muted); background: transparent; }
+.notificationList { display: grid; }
+.notificationItem { display: grid; gap: 5px; width: 100%; padding: 14px 18px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; white-space: normal; }
+.notificationItem:last-child { border-bottom: 0; }
+.notificationItem:hover, .notificationItem:focus-visible { background: var(--canvas); }
+.notificationItem.isUnread { box-shadow: inset 3px 0 0 #14705d; }
+.notificationItem strong { font-size: 13px; }
+.notificationItem span { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.notificationItem small, .notificationEmpty { color: var(--muted); font-size: 11px; }
+.notificationEmpty, .notificationError { margin: 0; padding: 17px 18px; }
+.notificationError { color: #a63d2d; font-size: 12px; }
+@media (max-width: 500px) { .notificationPanel { position: fixed; top: 68px; right: 12px; } }
 /* Tables respond to their actual space beside the sidebar, including at zoom. */
 @container request-list (max-width: 720px) {
   .app .requestsTable, [data-theme="dark"] .app .requestsTable { display: block; }

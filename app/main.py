@@ -149,6 +149,21 @@ DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 def me(user=Depends(get_current_user)):
     return user
 
+@app.get('/notifications', response_model=list[NotificationOut], tags=['Notifications'])
+def my_notifications(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.scalars(select(UserNotification).where(UserNotification.user_id == user.id)
+        .order_by(UserNotification.id.desc()).limit(100)).all()
+
+@app.post('/notifications/{notification_id}/read', response_model=NotificationOut, tags=['Notifications'])
+def read_notification(notification_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    row = db.get(UserNotification, notification_id)
+    if not row or row.user_id != user.id:
+        raise HTTPException(404, 'Notification not found')
+    if row.read_at is None:
+        row.read_at = now()
+        db.commit()
+    return row
+
 @app.get("/users", response_model=list[UserOut], tags=["Admin"])
 @app.get("/admin/users", response_model=list[UserOut], tags=["Admin"])
 def users(user=Depends(require_admin), db: Session = Depends(get_db)):

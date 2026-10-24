@@ -35,9 +35,9 @@ export function replyForOpenTicket(ticket, text) {
     if (!ticket.password_action_opened_at) return {message:
       'Please choose Continue at Microsoft for your current password request first. I can ask whether it worked after you return.', showResolution: false};
     return {message:
-      'Before we start another request, please tell me whether the Microsoft password action resolved your issue.', showResolution: true};
+      'I can help with that after you choose Resolved or Not resolved for your current request below.', showResolution: true};
   }
   if (['COMPLETED', 'FAILED', 'APPROVED_PROVISIONING_REQUIRED'].includes(ticket.status))
-    return {message: 'Before we start another request, please confirm whether your previous issue was resolved.', showResolution: true};
+    return {message: 'I can help with that after you choose Resolved or Not resolved for your current request below.', showResolution: true};
   return {message: 'Your current request is still being handled. Let’s finish that first, then I can help with the next one.', showResolution: false};
 }

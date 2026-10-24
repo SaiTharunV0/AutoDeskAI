@@ -4,11 +4,19 @@ from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from app.models import AccessRequest, ApplicationPolicy, HelpdeskRequest, AccessPolicyRevision, User, now
+from app.models import AccessRequest, ApplicationPolicy, HelpdeskRequest, AccessPolicyRevision, User, UserNotification, now
 from app.workflows import audit
 from app.provisioning import provision
 
 OPEN_STATES = ('AWAITING_ADMIN', 'APPROVED_PROVISIONING_REQUIRED')
+
+def notify_access_decision(db, access, display_name, source, reason=''):
+    approved = access.status == 'APPROVED_PROVISIONING_REQUIRED'
+    title = 'Application access approved' if approved else 'Application access rejected'
+    message = (f'Your request for {display_name} was approved {source}. Access still needs to be set up before you can use it.'
+               if approved else f'Your request for {display_name} was rejected {source}. {reason}'.strip())
+    db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
+        kind='ACCESS_APPROVED' if approved else 'ACCESS_REJECTED', title=title, message=message[:500]))
 
 def attempt_provision(db, policy, access):
     access.provision_attempts = (access.provision_attempts or 0) + 1
@@ -141,6 +149,9 @@ def submit_access(db, user, application, requested_role, justification, duration
     db.add(access)
     if status == 'APPROVED_PROVISIONING_REQUIRED':
         attempt_provision(db, row, access)
+    if status != 'AWAITING_ADMIN':
+        notify_access_decision(db, access, row.display_name or row.key,
+            'automatically under your organisation’s policy', '' if status != 'REJECTED' else reason)
     audit(db, user.id, 'ACCESS_REQUESTED', 'request', request.id, status, f'{row.key} / {requested_role}')
     audit(db, None, 'ACCESS_POLICY_EVALUATED', 'request', request.id, status,
           f'{row.key} v{row.version}: {decision}')
@@ -181,6 +192,8 @@ def decide_access(db, access_id, admin, decision, reason):
           'request', access.request_id, status, reason.strip())
     from app.workflows import close_rejected_request
     close_rejected_request(db, access.request, source='ADMIN')
+    notify_access_decision(db, access, policy.display_name if policy and policy.display_name else access.application,
+        'by an administrator', reason.strip())
     db.commit()
     return access
 

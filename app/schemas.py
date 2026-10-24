@@ -114,6 +114,16 @@ class RequestOut(BaseModel):
     updated_at: datetime
     task: TaskOut | None
 
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    request_id: int
+    kind: str
+    title: str
+    message: str
+    created_at: datetime
+    read_at: datetime | None
+
 class AuditRequestOut(RequestOut):
     username: str
 

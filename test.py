@@ -209,6 +209,17 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(access.request.status, 'CLOSED')
             self.assertIsNone(access.request.resolved)
             self.assertEqual(access.request.rejection_source, 'ADMIN')
+        notices = self.client.get('/notifications', headers=self.headers()).json()
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0]['kind'], 'ACCESS_REJECTED')
+        self.assertEqual(notices[0]['request_id'], row['request_id'])
+        self.assertIn('Not authorised', notices[0]['message'])
+        self.assertEqual(self.client.get('/notifications').status_code, 401)
+        self.assertEqual(self.client.get('/notifications', headers=self.headers(self.other)).json(), [])
+        self.assertEqual(self.client.post(f"/notifications/{notices[0]['id']}/read",
+            headers=self.headers(self.other)).status_code, 404)
+        read = self.client.post(f"/notifications/{notices[0]['id']}/read", headers=self.headers()).json()
+        self.assertIsNotNone(read['read_at'])
         self.assertEqual(self.request(Intent.PASSWORD_RESET, 'forgot password').status_code, 201)
 
     def test_confirmation_blocks_new_chat_and_access_requests(self):
@@ -309,6 +320,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(approved['approver_id'], self.admin['user']['id'])
         self.assertEqual(self.client.post(decision_url, headers=self.headers(self.admin), json={
             'decision': 'REJECT', 'reason': 'Second decision'}).status_code, 409)
+        notices = self.client.get('/notifications', headers=self.headers()).json()
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0]['kind'], 'ACCESS_APPROVED')
+        self.assertIn('Access still needs to be set up', notices[0]['message'])
+        self.assertEqual(self.client.get('/notifications', headers=self.headers(self.other)).json(), [])
         history = self.client.get(f'/requests/{first["request_id"]}/history', headers=self.headers()).json()
         self.assertIn('ACCESS_ADMIN_APPROVED', [item['action'] for item in history])
 
@@ -327,6 +343,9 @@ class WorkflowTests(unittest.TestCase):
             'idempotency_key': secrets.token_hex(16)}).json()
         self.assertEqual(denied['status'], 'REJECTED')
         self.assertEqual(denied['policy_version'], 2)
+        notices = self.client.get('/notifications', headers=self.headers(self.other)).json()
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0]['kind'], 'ACCESS_REJECTED')
         ticket = self.client.get('/requests/'+str(denied['request_id']), headers=self.headers(self.other)).json()
         self.assertEqual(ticket['status'], 'CLOSED')
         self.assertIsNone(ticket['resolved'])
@@ -340,6 +359,8 @@ class WorkflowTests(unittest.TestCase):
                 'idempotency_key': secrets.token_hex(16)}).json()
         self.assertEqual(row['status'], 'APPROVED_PROVISIONING_REQUIRED')
         self.assertEqual(row['provisioning_status'], 'TIMEOUT')
+        self.assertEqual(self.client.get('/notifications', headers=self.headers()).json()[0]['kind'],
+                         'ACCESS_APPROVED')
         self.assertEqual(row['provision_attempts'], 1)
         url = '/admin/access/requests/' + str(row['id']) + '/provisioning/retry'
         self.assertEqual(self.client.post(url, headers=self.headers()).status_code, 403)

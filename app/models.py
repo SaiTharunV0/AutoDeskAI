@@ -96,6 +96,19 @@ class AccessRequest(Base):
     last_provision_attempt_at: Mapped[datetime | None] = mapped_column(nullable=True)
     request: Mapped[HelpdeskRequest] = relationship(back_populates="access")
 
+class UserNotification(Base):
+    __tablename__ = "user_notifications"
+    __table_args__ = (UniqueConstraint("request_id", "kind", name="uq_user_notification_request_kind"),
+                      Index("ix_user_notifications_user_created", "user_id", "created_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    request_id: Mapped[int] = mapped_column(ForeignKey("helpdesk_requests.id"))
+    kind: Mapped[str] = mapped_column(String(30))
+    title: Mapped[str] = mapped_column(String(120))
+    message: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+    read_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     __table_args__ = (Index("ix_audit_resource", "resource_type", "resource_id", "id"),)
