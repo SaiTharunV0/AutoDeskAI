@@ -47,6 +47,7 @@ class HelpdeskRequest(Base):
     resolved: Mapped[bool | None] = mapped_column(nullable=True)
     resolution_reporter: Mapped[str | None] = mapped_column(String(20), nullable=True)
     rejection_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    password_action_opened_at: Mapped[datetime | None] = mapped_column(nullable=True)
     resolution_attempts: Mapped[int] = mapped_column(default=0)
     idempotency_key: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(default=now)

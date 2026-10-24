@@ -332,6 +332,7 @@ def password_action(request_id: int, user=Depends(get_current_user), db: Session
         audit(db, user.id, 'PASSWORD_ACTION_RETRIED', 'request', row.id,
               row.status, f'Attempt {row.resolution_attempts + 1}')
         db.commit()
+    row.password_action_opened_at = now()
     audit(db, user.id, row.intent + "_LINK_OPENED", "request", row.id, row.status,
           "Microsoft-hosted action issued; completion unverified")
     db.commit()

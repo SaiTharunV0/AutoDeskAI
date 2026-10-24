@@ -74,6 +74,7 @@ def upgrade_application_access(db_engine=engine):
             'resolved': 'BOOLEAN',
             'resolution_reporter': 'VARCHAR(20)',
             'rejection_source': 'VARCHAR(20)',
+            'password_action_opened_at': 'TIMESTAMP',
             'resolution_attempts': 'INTEGER NOT NULL DEFAULT 0',
         },
     }
@@ -95,3 +96,12 @@ def upgrade_application_access(db_engine=engine):
                 THEN 'ADMIN' ELSE 'AUTODESKAI' END
                 WHERE status = 'CLOSED' AND rejection_source IS NULL
                 AND message LIKE '%I have closed this ticket; no confirmation is needed.%'"""))
+        if 'intent' in request_columns and inspect(connection).has_table('audit_logs'):
+            connection.execute(text("""UPDATE helpdesk_requests SET password_action_opened_at =
+                (SELECT MAX(timestamp) FROM audit_logs WHERE audit_logs.resource_type = 'request'
+                 AND audit_logs.resource_id = helpdesk_requests.id
+                 AND audit_logs.action IN ('PASSWORD_RESET_LINK_OPENED', 'PASSWORD_CHANGE_LINK_OPENED'))
+                WHERE password_action_opened_at IS NULL AND intent IN ('PASSWORD_RESET', 'PASSWORD_CHANGE')
+                AND EXISTS (SELECT 1 FROM audit_logs WHERE audit_logs.resource_type = 'request'
+                 AND audit_logs.resource_id = helpdesk_requests.id
+                 AND audit_logs.action IN ('PASSWORD_RESET_LINK_OPENED', 'PASSWORD_CHANGE_LINK_OPENED'))"""))

@@ -104,6 +104,7 @@ class WorkflowTests(unittest.TestCase):
     def test_password_and_request_ownership(self):
         row = self.request(Intent.PASSWORD_RESET, "I forgot my password").json()
         self.assertEqual(row["status"], "AWAITING_USER_ACTION")
+        self.assertIsNone(row['password_action_opened_at'])
         admin_rows = self.client.get("/admin/requests", headers=self.headers(self.admin)).json()
         self.assertEqual(next(item for item in admin_rows if item["id"] == row["id"])["original_message"],
                          "i forgot my password")
@@ -118,8 +119,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["url"], "https://passwordreset.microsoftonline.com/")
         self.assertEqual(response.json()["status"], "AWAITING_USER_ACTION")
-        self.assertEqual(self.client.get(f'/requests/{row["id"]}',headers=self.headers()).json()["status"],
-                         "AWAITING_USER_ACTION")
+        updated = self.client.get(f'/requests/{row["id"]}',headers=self.headers()).json()
+        self.assertEqual(updated['status'], 'AWAITING_USER_ACTION')
+        self.assertIsNotNone(updated['password_action_opened_at'])
         self.assertEqual(self.client.post(f'/requests/{row["id"]}/password/confirm',
             headers=self.headers(), json={"confirm_simulation": True}).status_code, 404)
         history = self.client.get(f'/requests/{row["id"]}/history', headers=self.headers()).json()
@@ -364,7 +366,10 @@ class WorkflowTests(unittest.TestCase):
     def test_application_access_migration_preserves_existing_rows(self):
         old = create_engine('sqlite://')
         with old.begin() as connection:
-            connection.execute(text('CREATE TABLE helpdesk_requests (id INTEGER PRIMARY KEY)'))
+            connection.execute(text('CREATE TABLE helpdesk_requests (id INTEGER PRIMARY KEY, intent VARCHAR(30), status VARCHAR(30), message VARCHAR(500))'))
+            connection.execute(text("INSERT INTO helpdesk_requests VALUES (1, 'PASSWORD_RESET', 'AWAITING_USER_ACTION', 'Continue at Microsoft')"))
+            connection.execute(text('CREATE TABLE audit_logs (resource_type VARCHAR(40), resource_id INTEGER, action VARCHAR(80), timestamp TIMESTAMP)'))
+            connection.execute(text("INSERT INTO audit_logs VALUES ('request', 1, 'PASSWORD_RESET_LINK_OPENED', CURRENT_TIMESTAMP)"))
             connection.execute(text('CREATE TABLE application_policies (key VARCHAR(80) PRIMARY KEY, enabled BOOLEAN, required_role VARCHAR(30))'))
             connection.execute(text("INSERT INTO application_policies VALUES ('tableau', 1, 'employee')"))
             connection.execute(text('CREATE TABLE access_requests (id INTEGER PRIMARY KEY, request_id INTEGER, user_id INTEGER, application VARCHAR(80), status VARCHAR(30), decision_reason VARCHAR(200), created_at TIMESTAMP)'))
@@ -374,6 +379,7 @@ class WorkflowTests(unittest.TestCase):
         with old.connect() as connection:
             self.assertEqual(connection.execute(text("SELECT display_name FROM application_policies WHERE key='tableau'")).scalar(), 'Tableau (example)')
             self.assertEqual(connection.execute(text('SELECT requested_role FROM access_requests WHERE id=1')).scalar(), 'viewer')
+            self.assertIsNotNone(connection.execute(text('SELECT password_action_opened_at FROM helpdesk_requests WHERE id=1')).scalar())
         old.dispose()
 
     def test_legacy_demo_access_is_not_reported_as_granted(self):

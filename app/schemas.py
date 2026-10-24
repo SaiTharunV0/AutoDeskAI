@@ -108,6 +108,7 @@ class RequestOut(BaseModel):
     resolved: bool | None = None
     resolution_reporter: str | None = None
     rejection_source: str | None = None
+    password_action_opened_at: datetime | None = None
     resolution_attempts: int = 0
     created_at: datetime
     updated_at: datetime
