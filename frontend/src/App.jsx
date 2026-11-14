@@ -181,7 +181,7 @@ function Auth({mode,setMode,submit,busy,error,authRole,setAuthRole,theme,setThem
 function Chat({chat,msg,setMsg,send,busy,retryAfter=0,devices,selected,setSelected,clarify,cancel,full,passwordAction,activeTicket,closeTicket,promptResolution=false}){
  const chatLog=useRef(null);
  const composer=chatComposerState(msg,busy,retryAfter);
- const showTicketPrompt=Boolean(activeTicket&&(promptResolution||(activeTicket.status==='NEEDS_CLARIFICATION'&&!chat.some(message=>message.r==='bot'&&message.id===activeTicket.id&&message.t===activeTicket.message))));
+ const showTicketPrompt=Boolean(activeTicket);
  useEffect(()=>{if(chatLog.current)chatLog.current.scrollTop=chatLog.current.scrollHeight},[chat.length,busy,activeTicket?.id,activeTicket?.status,promptResolution]);
  return <section className={'card assistant '+(full?'full':'')} aria-label="AI Assistant">
   <div className="cardHead"><div className="title"><div className="bot"><img src="/logo.png?v=2" alt=""/></div><div><b>Your IT assistant</b><small>Tell me what’s getting in your way.</small></div></div><span className="online"><i/>{busy?'Working':'Ready to help'}</span></div>

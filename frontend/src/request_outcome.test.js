@@ -17,6 +17,12 @@ test('an open password request shows the employee action', () => {
     {label: 'Awaiting user action', code: 'awaiting_user_action'});
 });
 
+test('old GitHub clarification closure says no access was granted', () => {
+  assert.equal(requestResolution({status: 'CLOSED', intent: 'CLARIFICATION',
+    message: 'To request GitHub organization access, open Application Access.'}),
+    'Guidance provided; no access request submitted');
+});
+
 test('rejected requests name the deciding party in the resolution', () => {
   assert.equal(requestResolution({status: 'CLOSED', rejection_source: 'AUTODESKAI'}),
     'Rejected by AutoDeskAI under admin configuration');

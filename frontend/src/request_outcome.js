@@ -31,6 +31,10 @@ export function requestOutcome(request) {
 }
 
 export function requestResolution(request) {
+  if (request.status === 'CLOSED' && request.intent === 'CLARIFICATION'
+      && request.message?.includes('To request GitHub organization access')) {
+    return 'Guidance provided; no access request submitted';
+  }
   if (requestOutcome(request).code === 'rejected') {
     return request.rejection_source === 'ADMIN'
       ? 'Rejected by administrator'
