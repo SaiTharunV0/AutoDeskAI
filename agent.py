@@ -6,7 +6,7 @@ import config
 from schema import AgentResponse, Intent
 from prompts import SYSTEM_PROMPT
 from validator import validate_agent_response
-from app.catalog import SOFTWARE, APPLICATIONS
+from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS
 
 class UnsafeRequest(ValueError):
     pass
@@ -55,15 +55,15 @@ def safe_message(text: str) -> str:
     for item in SOFTWARE.values():
         if any(re.search(r"\b" + re.escape(alias) + r"\b", lowered) for alias in item["aliases"]):
             tokens.append("vscode")
-    for key in APPLICATIONS:
+    for key in (*APPLICATIONS, *EXAMPLE_APPLICATIONS):
         if re.search(r"\b" + re.escape(key) + r"\b", lowered):
             tokens.append(key)
-    unknown = set(words) - permitted - {"vscode", "vs", "code", "visual", "studio", "tableau",
+    unknown = set(words) - permitted - {"vscode", "vs", "code", "visual", "studio", "tableau", "github", "jira", "powerbi",
         "can", "you", "could", "would", "like", "a", "an", "the", "some", "something",
         "software", "application", "app", "system", "computer", "laptop", "device", "it"}
     if unknown and any(word in tokens for word in ("install", "installed", "setup", "download")) and "vscode" not in tokens:
         tokens.append("unapproved_software")
-    if unknown and any(word in tokens for word in ("access", "permission", "grant")) and "tableau" not in tokens:
+    if unknown and any(word in tokens for word in ("access", "permission", "grant")) and not any(key in tokens for key in (*APPLICATIONS, *EXAMPLE_APPLICATIONS)):
         tokens.append("unknown_application")
     return " ".join(tokens) or "unspecified request"
 
@@ -111,6 +111,9 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
                bool(words & {"access", "permission", "grant"}), "password" in words]
     if sum(actions) > 1:
         return AgentResponse(intent=Intent.CLARIFICATION, message="Please request one workflow at a time.")
+    if 'github' in words and words & {'access', 'permission', 'grant'}:
+        return AgentResponse(intent=Intent.CHAT,
+            message='To request GitHub organization access, open Application Access, choose GitHub, and enter your GitHub username. An administrator will review your request.')
     pending = _resolve_pending_clarification(safe, previous_response)
     if pending:
         # Validate follow-up in the context of the prior backend-owned question.

@@ -992,6 +992,12 @@ class AITests(unittest.TestCase):
         self.assertEqual(result.intent,Intent.CLARIFICATION)
         self.assertIn('Tableau access', result.message)
         client.assert_not_called()
+    def test_github_chat_guides_employee_to_access_form_without_model(self):
+        with patch('agent.get_model_client') as client:
+            result = process_request('I need access to GitHub')
+        self.assertEqual(result.intent, Intent.CHAT)
+        self.assertIn('Application Access', result.message)
+        client.assert_not_called()
     def test_general_chat_uses_original_text(self):
         with patch('agent.get_model_client') as client:
             result=process_request('How r u?')
