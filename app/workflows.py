@@ -1,5 +1,6 @@
 from datetime import timedelta
 import json
+import re
 from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -109,6 +110,18 @@ def create_workflow(db, user, payload):
         if prior.user_id != user.id or prior.status != "NEEDS_CLARIFICATION":
             raise HTTPException(409, "Previous request is not awaiting clarification")
         previous = AgentResponse(intent=Intent.CLARIFICATION, message=prior.message)
+        if prior.message == 'Enter your GitHub username to request access.':
+            login = payload.message.strip().lower()
+            if not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?', login):
+                return ChatOut(message='Enter a valid GitHub username to continue this request.')
+            policy = db.get(ApplicationPolicy, 'github')
+            if not policy or not policy.enabled or policy.provider_type != 'GITHUB_ORG':
+                return ChatOut(message='GitHub organization access is not available right now. Please contact your administrator.')
+            from app.access import submit_access
+            role = json.loads(policy.requestable_roles_json)[0]
+            submit_access(db, user, 'github', role, '', policy.default_duration_days,
+                          payload.idempotency_key, existing_request=prior, github_login=login)
+            return prior
         if 'which application' in prior.message.lower():
             answer = ' '.join(payload.message.lower().strip().split()).strip(' .?!')
             policies = db.scalars(select(ApplicationPolicy)).all()
@@ -123,11 +136,7 @@ def create_workflow(db, user, payload):
             if not clarification_application:
                 return ChatOut(message=f"Let's finish your current access request first. {prior.message}")
             if clarification_application == 'github':
-                prior.status = 'CLOSED'
-                prior.message = ('To request GitHub organization access, open Application Access, choose GitHub, '
-                                 'and enter your GitHub username. An administrator will review your request.')
-                audit(db, user.id, 'CLARIFICATION_ROUTED_TO_ACCESS_FORM', 'request', prior.id,
-                      'CLOSED', 'GitHub access requires employee-supplied username')
+                prior.message = 'Enter your GitHub username to request access.'
                 db.commit()
                 return prior
             safe = f'access {clarification_application}'
@@ -221,7 +230,9 @@ def create_workflow(db, user, payload):
     elif result.intent == Intent.CLARIFICATION:
         request.status = "NEEDS_CLARIFICATION"
         # Never relay arbitrary model prose or credentials back into history.
-        if result.message == "Please request one workflow at a time.":
+        if result.message == 'Enter your GitHub username to request access.':
+            request.message = result.message
+        elif result.message == "Please request one workflow at a time.":
             request.message = result.message
         elif "access" in safe or (previous and "application" in previous.message):
             request.message = "Which application do you need access to? For GitHub, use Application Access to enter your GitHub username."

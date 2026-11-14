@@ -112,8 +112,8 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
     if sum(actions) > 1:
         return AgentResponse(intent=Intent.CLARIFICATION, message="Please request one workflow at a time.")
     if 'github' in words and words & {'access', 'permission', 'grant'}:
-        return AgentResponse(intent=Intent.CHAT,
-            message='To request GitHub organization access, open Application Access, choose GitHub, and enter your GitHub username. An administrator will review your request.')
+        return AgentResponse(intent=Intent.CLARIFICATION,
+            message='Enter your GitHub username to request access.')
     pending = _resolve_pending_clarification(safe, previous_response)
     if pending:
         # Validate follow-up in the context of the prior backend-owned question.

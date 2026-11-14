@@ -766,14 +766,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post('/requests', headers=self.headers(), json={
             'message':'I forgot my password', 'idempotency_key':secrets.token_hex(16)}).status_code, 409)
 
-    def test_github_clarification_reply_routes_to_employee_form(self):
+    def test_github_clarification_collects_username_and_submits_request(self):
+        import httpx
+        payload = self.access_policy_payload(requestable_roles=['member'], provider_type='GITHUB_ORG')
+        self.assertEqual(self.client.post('/admin/access/applications', headers=self.headers(self.admin),
+            json=payload).status_code, 201)
         row = self.request(Intent.CLARIFICATION, 'i need access').json()
         response = self.client.post('/requests', headers=self.headers(), json={
             'message': 'github', 'previous_request_id': row['id'],
             'idempotency_key': secrets.token_hex(16)})
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()['status'], 'CLOSED')
-        self.assertIn('enter your GitHub username', response.json()['message'])
+        self.assertEqual(response.json()['status'], 'NEEDS_CLARIFICATION')
+        self.assertIn('GitHub username', response.json()['message'])
+        with patch('httpx.get', return_value=httpx.Response(200, json={
+            'id': 123, 'type': 'User', 'login': 'saitharunv0'})):
+            submitted = self.client.post('/requests', headers=self.headers(), json={
+                'message': 'saitharunv0', 'previous_request_id': row['id'],
+                'idempotency_key': secrets.token_hex(16)})
+        self.assertEqual(submitted.status_code, 201)
+        self.assertEqual(submitted.json()['status'], 'AWAITING_ADMIN')
+        with self.sessions() as db:
+            self.assertEqual(db.scalar(select(AccessRequest).where(
+                AccessRequest.request_id == row['id'])).github_login, 'saitharunv0')
         self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), 1)
 
     def test_password_hash_and_no_credentials_in_audits(self):
@@ -1002,11 +1016,11 @@ class AITests(unittest.TestCase):
         self.assertEqual(result.intent,Intent.CLARIFICATION)
         self.assertIn('Tableau access', result.message)
         client.assert_not_called()
-    def test_github_chat_guides_employee_to_access_form_without_model(self):
+    def test_github_chat_asks_for_username_without_model(self):
         with patch('agent.get_model_client') as client:
             result = process_request('I need access to GitHub')
-        self.assertEqual(result.intent, Intent.CHAT)
-        self.assertIn('Application Access', result.message)
+        self.assertEqual(result.intent, Intent.CLARIFICATION)
+        self.assertIn('GitHub username', result.message)
         client.assert_not_called()
     def test_general_chat_uses_original_text(self):
         with patch('agent.get_model_client') as client:
