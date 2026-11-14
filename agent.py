@@ -77,6 +77,25 @@ def _resolve_pending_clarification(user_message, previous_response=None):
         return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software="vscode", message="Installation request identified.")
     return None
 
+def _workflow_fallback(safe):
+    """Keep the bounded service workflows available during model outages."""
+    words = set(safe.split())
+    if 'password' in words:
+        if words & {'forgot', 'reset'}:
+            return AgentResponse(intent=Intent.PASSWORD_RESET, message='Password reset requested.')
+        if words & {'change', 'update'}:
+            return AgentResponse(intent=Intent.PASSWORD_CHANGE, message='Password change requested.')
+        return AgentResponse(intent=Intent.CLARIFICATION, message='Do you need to change or reset your password?')
+    if words & {'install', 'installed', 'setup', 'download'}:
+        target = 'vscode' if 'vscode' in words else 'unapproved_software' if 'unapproved_software' in words else None
+        return validate_agent_response(AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=target,
+            message='Software installation requested.'), safe)
+    if words & {'access', 'permission', 'grant'}:
+        target = 'tableau' if 'tableau' in words else 'unknown_application' if 'unknown_application' in words else None
+        return validate_agent_response(AgentResponse(intent=Intent.ACCESS_REQUEST, application=target,
+            message='Application access requested.'), safe)
+    return None
+
 def process_request(user_message: str, previous_response: AgentResponse | None = None) -> AgentResponse:
     safe = safe_message(user_message)
     words = set(safe.split())
@@ -127,6 +146,9 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
             result.software = next((key for key in (*SOFTWARE, "unapproved_software") if key in safe.split()), None)
         return validate_agent_response(result, safe)
     except Exception:
+        fallback = _workflow_fallback(safe)
+        if fallback is not None:
+            return fallback
         raise RuntimeError("Local AI unavailable or returned an invalid response. Please retry.") from None
 
 if __name__ == "__main__":

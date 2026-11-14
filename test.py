@@ -1005,9 +1005,11 @@ class AITests(unittest.TestCase):
     def test_bad_response_and_offline(self):
         with patch("agent.ollama.Client") as client:
             client.return_value.chat.return_value={"message":{"content":"invalid JSON"}}
-            with self.assertRaises(RuntimeError): process_request("change password")
+            self.assertEqual(process_request("change password").intent, Intent.PASSWORD_CHANGE)
             client.return_value.chat.side_effect=ConnectionError()
-            with self.assertRaises(RuntimeError): process_request("change password")
+            self.assertEqual(process_request("change password").intent, Intent.PASSWORD_CHANGE)
+            self.assertEqual(process_request("install vscode").intent, Intent.SOFTWARE_INSTALL)
+            self.assertEqual(process_request("access Tableau").intent, Intent.ACCESS_REQUEST)
     def test_followup(self):
         result=process_request("Tableau",AgentResponse(intent=Intent.CLARIFICATION,message="Which application?"))
         self.assertEqual(result.application,"tableau")
