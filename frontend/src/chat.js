@@ -7,6 +7,6 @@ export function chatComposerState(message, busy, retryAfter = 0) {
     overLimit: message.length > CHAT_MESSAGE_LIMIT,
     disabled: busy || !trimmed || retryAfter > 0 || message.length > CHAT_MESSAGE_LIMIT,
     hint: retryAfter > 0 ? `Please wait ${retryAfter} seconds before sending another message.`
-      : 'I can help with password change/reset, application access, and request statuses. Software installation is not implemented yet.',
+      : 'I can help with password change/reset, live software installation, application access, and request statuses.',
   };
 }

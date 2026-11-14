@@ -36,24 +36,6 @@ def close_legacy_rejections(db):
     db.commit()
 
 
-def reject_pending_software_requests(db):
-    """Stop unfinished simulated installations while the workflow is unavailable."""
-    rows = db.scalars(select(HelpdeskRequest).options(selectinload(HelpdeskRequest.task)).where(
-        HelpdeskRequest.intent == 'SOFTWARE_INSTALL',
-        HelpdeskRequest.status.in_(('PENDING', 'PROCESSING', 'RETRY_ACTION_REQUIRED')))).all()
-    for request in rows:
-        if request.task and request.task.status in ('PENDING', 'PROCESSING'):
-            request.task.status = 'REJECTED'
-            request.task.result = 'Software installation is not implemented yet.'
-        request.status = 'REJECTED'
-        request.message = "Software installation isn't implemented yet, so I can't install software for you right now."
-        audit(db, request.user_id, 'SOFTWARE_INSTALL_REJECTED', 'request', request.id,
-              'REJECTED', 'Unfinished simulation closed after workflow disabled')
-        close_rejected_request(db, request)
-    if rows:
-        db.commit()
-
-
 def owned_request(db, request_id, user):
     request = db.get(HelpdeskRequest, request_id)
     if not request or (request.user_id != user.id and
@@ -64,7 +46,8 @@ def owned_request(db, request_id, user):
 def expire_tasks(db):
     cutoff = now() - timedelta(seconds=config.TASK_TIMEOUT_SECONDS)
     tasks = db.scalars(select(SoftwareTask).options(selectinload(SoftwareTask.request)).where(
-        SoftwareTask.status.in_(["PENDING", "PROCESSING"]), SoftwareTask.created_at < cutoff
+        ((SoftwareTask.status == "PENDING") & (SoftwareTask.created_at < cutoff)) |
+        ((SoftwareTask.status == "PROCESSING") & (func.coalesce(SoftwareTask.started_at, SoftwareTask.created_at) < cutoff))
     ).with_for_update(skip_locked=True)).all()
     for task in tasks:
         task.status = task.request.status = "FAILED"
@@ -159,7 +142,7 @@ def create_workflow(db, user, payload):
         rows = db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.user_id == user.id)
                           .order_by(HelpdeskRequest.id.desc()).limit(10)).all()
         if not rows:
-            return ChatOut(message="You don’t have any requests yet. I can help with organization password change/reset and application access. Software installation is not implemented yet.")
+            return ChatOut(message="You don’t have any requests yet. I can help with organization password change/reset, approved software installation, and application access.")
         lines = [f"#{row.id} · {row.intent.replace('_', ' ').title()} · {row.status.replace('_', ' ').title()}"
                  for row in rows]
         return ChatOut(message="Your 10 most recent request statuses:\n" + "\n".join(lines))
@@ -191,10 +174,28 @@ def create_workflow(db, user, payload):
                           "When you return, let me know whether it worked. I can't check the result at Microsoft."
         audit(db, user.id, result.intent.value + "_REQUESTED", "request", request.id, request.status)
     elif result.intent == Intent.SOFTWARE_INSTALL:
-        request.status = 'REJECTED'
-        request.message = "Software installation isn't implemented yet, so I can't install software for you right now."
-        audit(db, user.id, 'SOFTWARE_INSTALL_REJECTED', 'request', request.id,
-              request.status, 'Installation workflow unavailable; no task created')
+        key = software_key(result.software)
+        policy = db.get(SoftwarePolicy, key) if key and key in safe.split() else None
+        device = db.get(Device, payload.device_id) if payload.device_id else None
+        if not key or not policy or not policy.enabled:
+            request.status = 'REJECTED'
+            request.message = 'This software is not approved for installation through AutoDeskAI.'
+        elif not device or device.owner_user_id != user.id or device.status != 'ACTIVE' or device.last_seen < now() - timedelta(minutes=2):
+            request.status = 'REJECTED'
+            request.message = 'Select an active, connected device assigned to you before requesting installation.'
+        elif device.os_info != 'Windows':
+            request.status = 'REJECTED'
+            request.message = 'Live installation is currently supported only on Windows devices.'
+        else:
+            request.status = 'PENDING'
+            request.message = f'{SOFTWARE[key]["display_name"]} installation is queued for your Windows device.'
+            db.add(SoftwareTask(request_id=request.id, device_id=device.id,
+                                software=key, status='PENDING'))
+            audit(db, user.id, 'SOFTWARE_INSTALL_QUEUED', 'request', request.id,
+                  request.status, f'{key} on device {device.id}; live installation')
+        if request.status == 'REJECTED':
+            audit(db, user.id, 'SOFTWARE_INSTALL_REJECTED', 'request', request.id,
+                  request.status, 'Policy or device eligibility check failed')
     elif result.intent == Intent.ACCESS_REQUEST:
         key = (result.application or "").strip().lower()
         policy = db.get(ApplicationPolicy, key) if key in safe.split() else None

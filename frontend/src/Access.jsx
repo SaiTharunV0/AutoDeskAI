@@ -21,15 +21,16 @@ function AccessStatus({row}) {
   return <span className={'status ' + row.status.toLowerCase()}>{label(row.status)}</span>;
 }
 
-function AccessHistory({rows, admin = false, onRetry}) {
+function AccessHistory({rows, admin = false, onRetry, onVerify}) {
   if (!rows.length) return <div className="accessEmpty"><span className="accessEmptyIcon"><History size={22}/></span><b>{admin ? 'No access requests yet' : 'Your request history starts here'}</b><p>{admin ? 'Application access requests and their outcomes will appear here.' : 'Once you request access, you can follow its progress here.'}</p></div>;
   return <PaginatedRows rows={rows}>{pageRows => <div className="accessHistory">
     {pageRows.map(row => {const evaluation = parseEvaluation(row.evaluation_json);return <article className="accessHistoryRow" key={row.id}>
       <div className="accessHistoryIdentity"><span className="accessAppMark" aria-hidden="true">{appInitials(row.application)}</span><div><b>{row.application}</b><small>Request #{row.request_id} <span aria-hidden="true">·</span> {formatDate(row.created_at)}</small></div></div>
       <AccessStatus row={row}/>
       {row.decision_reason && <p className="accessDecision">{row.decision_reason}</p>}
-      <div className="accessHistoryFacts"><span><small>Requested role</small><b>{row.requested_role}</b></span><span><small>Approval</small><b>{approvalLabel(row.approval_route)}</b></span><span><small>Provisioning</small><b>{label(row.provisioning_status)}</b></span><span><small>Policy</small><b>{evaluation.policy_id || row.application} · v{row.policy_version}</b></span>{row.expires_at && <span><small>Access expires</small><b>{formatDate(row.expires_at)}</b></span>}</div>
-      {admin && ['FAILED', 'TIMEOUT'].includes(row.provisioning_status) && <div className="accessActions"><button type="button" className="secondary" onClick={() => onRetry?.(row)}><RefreshCw size={15}/>Retry simulated provisioning</button></div>}
+      <div className="accessHistoryFacts"><span><small>Requested role</small><b>{row.requested_role}</b></span><span><small>Approval</small><b>{approvalLabel(row.approval_route)}</b></span><span><small>Provisioning</small><b>{label(row.provisioning_status)}</b></span><span><small>Policy</small><b>{evaluation.policy_id || row.application} · v{row.policy_version}</b></span>{row.github_login && <span><small>GitHub account</small><b>{row.github_login}</b></span>}{row.expires_at && <span><small>{row.github_login ? 'Recorded end date' : 'Access expires'}</small><b>{formatDate(row.expires_at)}</b></span>}</div>
+      {admin && ['FAILED', 'TIMEOUT', 'NOT_CONFIGURED', 'IDENTITY_MISMATCH'].includes(row.provisioning_status) && row.status === 'APPROVED_PROVISIONING_REQUIRED' && <div className="accessActions"><button type="button" className="secondary" onClick={() => onRetry?.(row)}><RefreshCw size={15}/>Retry provisioning</button></div>}
+      {admin && row.provisioning_status === 'PENDING_ACCEPTANCE' && <div className="accessActions"><button type="button" className="secondary" onClick={() => onVerify?.(row)}><RefreshCw size={15}/>Verify GitHub membership</button></div>}
       {admin && <details className="accessDecisionDetails"><summary>Decision details</summary><dl><div><dt>Requester</dt><dd>{row.username || row.user_id}</dd></div><div><dt>Approver</dt><dd>{row.approver_id || 'None'}</dd></div><div><dt>Duration</dt><dd>{row.duration_days} days</dd></div><div><dt>Policy</dt><dd>{evaluation.policy_id || row.application} · v{row.policy_version}</dd></div><div><dt>Conditions</dt><dd>{Object.entries(evaluation.conditions || {}).map(([key, value]) => `${key}: ${value === null ? 'unverified' : value ? 'pass' : 'fail'}`).join(', ') || 'None'}</dd></div><div><dt>Fallback</dt><dd>{label(evaluation.fallback)}</dd></div><div><dt>Justification</dt><dd>{row.justification || 'None supplied'}</dd></div></dl></details>}
     </article>})}
   </div>}</PaginatedRows>;
@@ -67,7 +68,7 @@ export function EmployeeAccess({api, onContinueChat}) {
         <label>Requested role<select value={role} onChange={event => setRole(event.target.value)}>{current.requestable_roles.map(value => <option key={value}>{value}</option>)}</select></label>
         <label>Duration in days<input type="number" min="1" max={current.max_duration_days} required value={days} onChange={event => setDays(event.target.value)}/><small>Maximum {current.max_duration_days} days</small></label>
         <label className="accessFullField">Business justification<textarea maxLength="500" value={justification} onChange={event => setJustification(event.target.value)} placeholder="How will you use this application for your work?"/><span className="accessFieldHint"><span>A little context helps your request get reviewed.</span><span>{justification.length}/500</span></span></label>
-        <div className="accessRequestPolicy"><ShieldCheck size={16}/><div><b>{approvalLabel(current.approval_mode)}</b><small>{current.provider_type === 'MOCK' ? 'Provisioning is simulated for this application.' : 'Provisioning is not configured for this application.'}</small></div></div>
+        <div className="accessRequestPolicy"><ShieldCheck size={16}/><div><b>{approvalLabel(current.approval_mode)}</b><small>{current.provider_type === 'GITHUB_ORG' ? 'A GitHub organization invitation requires acceptance before access is verified.' : current.provider_type === 'MOCK' ? 'Provisioning is simulated for this application.' : 'Provisioning is not configured for this application.'}</small></div></div>
         <button className="primary accessSubmit" type="submit" disabled={busy || Boolean(openTicket)}>{busy ? 'Submitting…' : 'Submit access request'}{!busy && <ArrowRight size={16}/>}</button></form> : <div className="accessRequestPlaceholder"><span className="accessEmptyIcon"><ShieldCheck size={25}/></span><span className="accessEyebrow">02 / REQUEST ACCESS</span><h2>Find your next tool</h2><p>Select an application to choose a role and send your access request.</p><span className="accessPlaceholderNote"><CheckCircle2 size={14}/>Every request stays in your history.</span></div>}</section></div>
       <section className="accessSection accessHistorySection"><div className="accessSectionHeading"><div><span className="accessEyebrow">KEEP TRACK</span><h2>My access requests <span className="accessInlineCount">{requests.length}</span></h2><p>Follow your requests from review to access.</p></div><button type="button" className="secondary" onClick={() => api('/access/requests').then(setRequests).catch(err => setError(err.message))}><RefreshCw size={14}/>Refresh status</button></div><AccessHistory rows={requests}/></section>
     </>}
@@ -76,13 +77,15 @@ export function EmployeeAccess({api, onContinueChat}) {
 
 export function AdminAccess({api, onPendingChange}) {
   const [apps, setApps] = useState([]), [requests, setRequests] = useState([]);
+  const [users, setUsers] = useState([]), [identities, setIdentities] = useState([]);
+  const [identityUser, setIdentityUser] = useState(''), [githubLogin, setGithubLogin] = useState('');
   const [revisions, setRevisions] = useState([]);
   const [form, setForm] = useState(defaultApplication), [isNew, setIsNew] = useState(true), [editorOpen, setEditorOpen] = useState(false);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
-  async function load() {const [catalog, history] = await Promise.all([api('/admin/access/applications'), api('/admin/access/requests')]);setApps(catalog);setRequests(history);onPendingChange?.(pendingAccessRequests(history))}
-  useEffect(() => {let live = true;Promise.all([api('/admin/access/applications'), api('/admin/access/requests')])
-    .then(([catalog, history]) => {if (live) {setApps(catalog);setRequests(history);onPendingChange?.(pendingAccessRequests(history))}})
+  async function load() {const [catalog, history, people, linked] = await Promise.all([api('/admin/access/applications'), api('/admin/access/requests'), api('/admin/users'), api('/admin/github-identities')]);setApps(catalog);setRequests(history);setUsers(people);setIdentities(linked);onPendingChange?.(pendingAccessRequests(history))}
+  useEffect(() => {let live = true;Promise.all([api('/admin/access/applications'), api('/admin/access/requests'), api('/admin/users'), api('/admin/github-identities')])
+    .then(([catalog, history, people, linked]) => {if (live) {setApps(catalog);setRequests(history);setUsers(people);setIdentities(linked);onPendingChange?.(pendingAccessRequests(history))}})
     .catch(err => {if (live) setError(err.message)})
     .finally(() => {if (live) setLoading(false)});return () => {live = false}}, [api, onPendingChange]);
   const update = (key, value) => setForm(current => ({...current, [key]: value}));
@@ -103,8 +106,28 @@ export function AdminAccess({api, onPendingChange}) {
     catch (err) {setError(err.message)} finally {setBusy(false)}}
   async function retry(row) {if (busy) return;setBusy(true);setError('');setNotice('');
     try {await api(`/admin/access/requests/${row.id}/provisioning/retry`, {method: 'POST'});
-      await load();setNotice(`Provisioning attempt recorded for request ${row.request_id}.`)}
+      await load();setNotice(`Provisioning retry completed for request ${row.request_id}.`)}
     catch (err) {setError(err.message)} finally {setBusy(false)}}
+  async function verify(row) {if (busy) return;setBusy(true);setError('');setNotice('');
+    try {const result = await api(`/admin/access/requests/${row.id}/provisioning/verify`, {method: 'POST'});
+      await load();setNotice(result.provisioning_status === 'GRANTED' ? `GitHub membership verified for request ${row.request_id}.` : `GitHub membership: ${label(result.provisioning_status)}.`)}
+    catch (err) {setError(err.message)} finally {setBusy(false)}}
+  async function linkIdentity(event) {event.preventDefault();if (busy || !identityUser || !githubLogin.trim()) return;
+    setBusy(true);setError('');setNotice('');try {
+      await api(`/admin/users/${identityUser}/github-identity`, {method: 'PUT', body: JSON.stringify({github_login: githubLogin.trim(), confirmed: true})});
+      await load();setIdentityUser('');setGithubLogin('');setNotice('GitHub identity confirmed.');
+    } catch (err) {setError(err.message)} finally {setBusy(false)}}
+  async function enableGithub() {if (busy) return;setBusy(true);setError('');setNotice('');
+    try {const current = apps.find(item => item.key === 'github');
+      const policy = buildPolicyPayload({...defaultApplication, ...current, key: 'github',
+        display_name: current?.display_name || 'GitHub',
+        description: 'Request membership in the AutoDeskAI GitHub organization.',
+        enabled: true, provider_type: 'GITHUB_ORG', requestable_roles: ['member'],
+        human_roles: [], approval_mode: 'ADMIN_ONLY', auto_allowed: false});
+      await api(current ? '/admin/access/applications/github' : '/admin/access/applications',
+        {method: current ? 'PUT' : 'POST', body: JSON.stringify(policy)});
+      await load();setEditorOpen(false);setNotice('GitHub organization access is enabled. Confirm an employee identity before testing a request.');
+    } catch (err) {setError(err.message)} finally {setBusy(false)}}
   const pending = pendingAccessRequests(requests);
   return <section className="pageCard accessPage accessAdminPage"><header className="accessPageHeader"><div><span className="accessEyebrow">ACCESS MANAGEMENT</span><h1>Applications & permissions</h1><p>A single place for your catalog, approvals and access policies.</p></div><span className="accessHeaderLabel"><ShieldCheck size={17}/>{apps.filter(item => item.enabled).length} active applications</span></header>
     {error && <div className="error" role="alert">{error}</div>}{notice && <div className="accessNotice" role="status"><CheckCircle2 size={18}/><p>{notice}</p></div>}
@@ -114,6 +137,7 @@ export function AdminAccess({api, onPendingChange}) {
         <p>{row.justification || 'No business justification supplied.'}</p><div className="accessApprovalMeta"><span><Clock3 size={13}/>{row.duration_days} days</span><span><ShieldCheck size={13}/>Policy v{row.policy_version}</span></div><div className="accessActions"><button type="button" className="primary" disabled={busy} onClick={() => decide(row, 'APPROVE')}><Check size={15}/>Approve request</button><button type="button" className="secondary accessReject" disabled={busy} onClick={() => decide(row, 'REJECT')}>Reject</button></div>
       </article>)}</div>}</PaginatedRows> : <div className="accessEmpty accessEmptyCompact"><span className="accessEmptyIcon"><CheckCircle2 size={22}/></span><div><b>You're all caught up</b><p>No access requests are waiting for approval.</p></div></div>}</section>
       <section className="accessSection"><div className="accessSectionHeading"><div><span className="accessEyebrow">YOUR ORGANIZATION'S TOOLS</span><h2>Application catalog <span className="accessInlineCount">{apps.length}</span></h2><p>Select an application to manage its policy.</p></div><button type="button" className="primary addApplicationButton" onClick={() => {setForm(defaultApplication);setIsNew(true);setEditorOpen(true);setRevisions([]);setError('');setNotice('')}}><Plus size={16}/>Add application</button></div>
+        {apps.find(item => item.key === 'github')?.provider_type !== 'GITHUB_ORG' && <div className="accessNotice"><ShieldCheck size={18}/><p>GitHub access is ready to configure for live organization invitations.</p><button type="button" className="secondary" disabled={busy} onClick={enableGithub}>Enable GitHub organization access</button></div>}
         <div className="accessCatalog accessAdminCatalog">{apps.map(item => <button type="button" aria-pressed={!isNew && form.key === item.key} className={'accessApp ' + (!isNew && form.key === item.key ? 'selected' : '')} key={item.key} onClick={() => edit(item)}>
           <span className="accessAppTop"><span className="accessAppMark" aria-hidden="true">{appInitials(item.display_name)}</span><span className={'accessAvailability ' + (item.enabled ? 'enabled' : '')}>{item.enabled ? 'Enabled' : 'Disabled'}</span></span><b>{item.display_name}</b><small>{item.key} · Policy v{item.version}</small><span className="accessAppTags"><span>{approvalLabel(item.approval_mode)}</span><span>{item.provider_type}</span></span></button>)}{!apps.length && <div className="accessEmpty"><span className="accessEmptyIcon"><Grid2X2 size={22}/></span><b>Build your application catalog</b><p>Add your first application to start managing access.</p></div>}</div>
       </section>
@@ -143,13 +167,17 @@ export function AdminAccess({api, onPendingChange}) {
           <label className="accessCheck"><input type="checkbox" checked={Boolean(form.conditions.require_verified_mfa)} onChange={event => setForm(current => ({...current, conditions: {...current.conditions, require_verified_mfa: event.target.checked}}))}/>Require verified MFA</label>
           <label className="accessCheck"><input type="checkbox" checked={form.conditions.employment_status === 'ACTIVE'} onChange={event => setForm(current => ({...current, conditions: {...current.conditions, employment_status: event.target.checked ? 'ACTIVE' : undefined}}))}/>Require verified active employment</label>
           <label>Risk<select value={form.risk} onChange={event => update('risk', event.target.value)}><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select></label>
-          <label>Provisioning provider<select value={form.provider_type} onChange={event => update('provider_type', event.target.value)}><option value="MOCK">Mock / simulated</option><option value="NONE">None</option></select></label>
+          <label>Provisioning provider<select value={form.provider_type} onChange={event => setForm(current => event.target.value === 'GITHUB_ORG' ? {...current, provider_type: 'GITHUB_ORG', key: 'github', requestable_roles: ['member'], human_roles: [], approval_mode: 'ADMIN_ONLY', auto_allowed: false} : {...current, provider_type: event.target.value})}><option value="MOCK">Mock / simulated</option><option value="NONE">None</option><option value="GITHUB_ORG" disabled={!isNew && form.key !== 'github'}>GitHub organization (live)</option></select></label>
           <label>Configuration reference (no secrets)<input value={form.config_ref} onChange={event => update('config_ref', event.target.value)}/></label>
         </div><p className="accessPolicyHelp"><ShieldCheck size={16}/><span>Automatic approval checks the role, risk, duration and configured conditions. High risk requests, human approval roles, and failed or unverified checks follow the fallback policy.</span></p></details>
         <div className="accessEditorActions"><p>Changes create a new policy revision.</p><button type="button" className="secondary" onClick={() => setEditorOpen(false)}>Cancel</button><button className="primary" disabled={busy}>{busy ? 'Saving…' : isNew ? 'Add application' : 'Save changes'}</button></div>
       </form>}
       {!isNew && <details className="accessRevisions"><summary><History size={16}/>Policy revisions<span className="accessInlineCount">{revisions.length}</span></summary><div>{revisions.length ? revisions.map(row => <p key={row.version}><b>Version {row.version}</b><span>Administrator {row.actor_id || 'System'} · {formatDate(row.created_at)}</span><small>{label(row.snapshot.approval_mode)}</small></p>) : <p>No revisions available.</p>}</div></details>}
-      <section className="accessSection accessHistorySection"><div className="accessSectionHeading"><div><span className="accessEyebrow">THE COMPLETE PICTURE</span><h2>Request history <span className="accessInlineCount">{requests.length}</span></h2><p>Decisions, provisioning updates and the details behind them.</p></div></div><AccessHistory rows={requests} admin onRetry={retry}/></section>
+      <section className="accessSection"><div className="accessSectionHeading"><div><span className="accessEyebrow">GITHUB ORGANIZATION</span><h2>Confirmed identities <span className="accessInlineCount">{identities.length}</span></h2><p>Confirm the employee and their GitHub account before inviting them to the organization.</p></div></div>
+        <form className="accessForm accessEditor" onSubmit={linkIdentity}><div className="accessEditorGrid"><label>Employee<select required value={identityUser} onChange={event => setIdentityUser(event.target.value)}><option value="">Choose an employee</option>{users.filter(item => item.role === 'employee').map(item => <option value={item.id} key={item.id}>{item.name || item.username || item.email} ({item.email})</option>)}</select></label><label>Verified GitHub login<input required value={githubLogin} onChange={event => setGithubLogin(event.target.value)} placeholder="github-username"/></label></div><p className="accessPolicyHelp">By saving, you confirm this GitHub account belongs to the selected employee. The account ID is checked against GitHub and locked into future requests.</p><div className="accessEditorActions"><button type="submit" className="primary" disabled={busy || !identityUser || !githubLogin.trim()}>Confirm GitHub identity</button></div></form>
+        {identities.length > 0 && <div className="accessHistory">{identities.map(item => {const person = users.find(user => user.id === item.user_id);return <div className="accessHistoryRow" key={item.user_id}><b>{person?.name || person?.email || `Employee ${item.user_id}`}</b><small>GitHub: {item.github_login} · ID {item.github_user_id}</small></div>})}</div>}
+      </section>
+      <section className="accessSection accessHistorySection"><div className="accessSectionHeading"><div><span className="accessEyebrow">THE COMPLETE PICTURE</span><h2>Request history <span className="accessInlineCount">{requests.length}</span></h2><p>Decisions, provisioning updates and the details behind them.</p></div></div><AccessHistory rows={requests} admin onRetry={retry} onVerify={verify}/></section>
     </>}
   </section>;
 }

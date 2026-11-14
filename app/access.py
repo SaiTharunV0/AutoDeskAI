@@ -1,19 +1,22 @@
-"""Deterministic application access decisions. No provider grants real access."""
+"""Deterministic application access decisions and bounded provisioning."""
 import json
 from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from app.models import AccessRequest, ApplicationPolicy, HelpdeskRequest, AccessPolicyRevision, User, UserNotification, now
+from app.models import AccessRequest, ApplicationPolicy, HelpdeskRequest, AccessPolicyRevision, GitHubIdentity, User, UserNotification, now
 from app.workflows import audit
 from app.provisioning import provision
 
 OPEN_STATES = ('AWAITING_ADMIN', 'APPROVED_PROVISIONING_REQUIRED')
 
 def notify_access_decision(db, access, display_name, source, reason=''):
-    approved = access.status == 'APPROVED_PROVISIONING_REQUIRED'
+    approved = access.status != 'REJECTED'
     title = 'Application access approved' if approved else 'Application access rejected'
-    message = (f'Your request for {display_name} was approved {source}. Access still needs to be set up before you can use it.'
+    next_step = ('GitHub membership was verified.' if access.provisioning_status == 'GRANTED' else
+                 'Accept the GitHub invitation before using it.' if access.provisioning_status == 'PENDING_ACCEPTANCE' else
+                 'Access still needs to be set up before you can use it.')
+    message = (f'Your request for {display_name} was approved {source}. {next_step}'
                if approved else f'Your request for {display_name} was rejected {source}. {reason}'.strip())
     db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
         kind='ACCESS_APPROVED' if approved else 'ACCESS_REJECTED', title=title, message=message[:500]))
@@ -23,14 +26,27 @@ def attempt_provision(db, policy, access):
     access.last_provision_attempt_at = now()
     try:
         result = provision(policy, access)
-        status = result.status if result.status in ('SIMULATED', 'NOT_CONFIGURED', 'FAILED', 'TIMEOUT') else 'FAILED'
+        status = result.status if result.status in ('SIMULATED', 'NOT_CONFIGURED', 'FAILED', 'TIMEOUT', 'IDENTITY_MISMATCH', 'PENDING_ACCEPTANCE', 'GRANTED') else 'FAILED'
+        if status == 'GRANTED' and not result.verified:
+            status = 'FAILED'
+        access.provider_managed = bool(access.provider_managed or result.managed)
     except TimeoutError:
         status = 'TIMEOUT'
     except Exception:
         status = 'FAILED'
     access.provisioning_status = status
+    if status == 'GRANTED':
+        access.provisioned_at = now()
+        access.expires_at = now() + timedelta(days=access.duration_days)
+        access.status = access.request.status = 'COMPLETED'
+        access.request.message = 'GitHub organization membership was verified. Report whether you can use the access.'
+        db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
+            kind='ACCESS_GRANTED', title='GitHub access verified',
+            message='Your GitHub organization membership is active. Please check that you can use it.'))
+    elif status == 'PENDING_ACCEPTANCE':
+        access.request.message = 'GitHub sent an organization invitation. Accept it, then ask an administrator to verify access.'
     audit(db, None, 'ACCESS_PROVISIONING_ATTEMPT', 'request', access.request_id,
-          status, f'Provider {policy.provider_type}; no verified grant')
+          status, f'Provider {policy.provider_type}; verified={status == "GRANTED"}')
 
 def catalog_view(row):
     return {
@@ -46,6 +62,8 @@ def catalog_view(row):
     }
 
 def save_policy(db, row, payload, actor_id):
+    if payload.provider_type == 'GITHUB_ORG' and (payload.key != 'github' or payload.requestable_roles != ['member'] or payload.approval_mode != 'ADMIN_ONLY'):
+        raise HTTPException(422, 'GitHub provider requires the github application, member role, and administrator approval')
     values = payload.model_dump(exclude={'key'})
     for name, value in values.items():
         if name in ('requestable_roles', 'allowed_groups', 'conditions', 'human_roles'):
@@ -140,12 +158,19 @@ def submit_access(db, user, application, requested_role, justification, duration
     request.status, request.message = status, reason
     db.add(request)
     db.flush()
+    identity = db.get(GitHubIdentity, user.id) if row.provider_type == 'GITHUB_ORG' else None
+    if row.provider_type == 'GITHUB_ORG' and not identity:
+        raise HTTPException(409, 'An administrator must verify your GitHub account before this request')
+    import os
     access = AccessRequest(request_id=request.id, user_id=user.id, application=row.key,
         requested_role=requested_role, justification=justification.strip(), duration_days=duration_days,
         status=status, approval_route='AUTOMATIC' if decision == 'AUTOMATIC_APPROVAL' else 'ADMIN',
         policy_version=row.version, evaluation_json=json.dumps(evaluation, sort_keys=True),
         decision_reason=reason, provisioning_status='NOT_STARTED',
-        decision_at=now() if status != 'AWAITING_ADMIN' else None)
+        decision_at=now() if status != 'AWAITING_ADMIN' else None,
+        github_login=identity.github_login if identity else None,
+        github_user_id=identity.github_user_id if identity else None,
+        provider_resource=os.getenv('GITHUB_ORG', '') if identity else None)
     db.add(access)
     if status == 'APPROVED_PROVISIONING_REQUIRED':
         attempt_provision(db, row, access)
@@ -201,7 +226,7 @@ def retry_provisioning(db, access_id, admin):
     access = db.scalar(select(AccessRequest).where(AccessRequest.id == access_id).with_for_update())
     if not access:
         raise HTTPException(404, 'Access request not found')
-    if access.status != 'APPROVED_PROVISIONING_REQUIRED' or access.provisioning_status not in ('FAILED', 'TIMEOUT'):
+    if access.status != 'APPROVED_PROVISIONING_REQUIRED' or access.provisioning_status not in ('FAILED', 'TIMEOUT', 'NOT_CONFIGURED', 'IDENTITY_MISMATCH'):
         raise HTTPException(409, 'Provisioning retry is not available')
     policy = db.get(ApplicationPolicy, access.application)
     if not policy:
@@ -209,6 +234,36 @@ def retry_provisioning(db, access_id, admin):
     attempt_provision(db, policy, access)
     audit(db, admin.id, 'ACCESS_PROVISIONING_RETRIED', 'request', access.request_id,
           access.provisioning_status, f'Attempt {access.provision_attempts}')
+    db.commit()
+    return access
+
+def verify_github_access(db, access_id, admin):
+    access = db.scalar(select(AccessRequest).where(AccessRequest.id == access_id).with_for_update())
+    if not access:
+        raise HTTPException(404, 'Access request not found')
+    policy = db.get(ApplicationPolicy, access.application)
+    if not policy or policy.provider_type != 'GITHUB_ORG' or access.status != 'APPROVED_PROVISIONING_REQUIRED':
+        raise HTTPException(409, 'GitHub verification is unavailable for this request')
+    from app.github_provider import GitHubOrganizationProvider
+    result = GitHubOrganizationProvider().verify(access)
+    if result.status == 'GRANTED' and result.verified and access.provisioning_status != 'GRANTED':
+        access.provisioning_status = 'GRANTED'
+        access.provisioned_at = now()
+        access.expires_at = now() + timedelta(days=access.duration_days)
+        access.status = access.request.status = 'COMPLETED'
+        access.request.message = 'GitHub organization membership was verified. Report whether you can use the access.'
+        db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
+            kind='ACCESS_GRANTED', title='GitHub access verified',
+            message='Your GitHub organization membership is active. Please check that you can use it.'))
+        audit(db, admin.id, 'ACCESS_GRANT_VERIFIED', 'request', access.request_id, 'COMPLETED', 'GitHub membership active')
+    elif result.status == 'PENDING_ACCEPTANCE':
+        access.provisioning_status = 'PENDING_ACCEPTANCE'
+    elif result.status == 'NOT_GRANTED':
+        access.provisioning_status = 'FAILED'
+    elif result.status == 'GRANTED':
+        access.provisioning_status = 'FAILED'
+    elif result.status != 'PENDING_ACCEPTANCE':
+        access.provisioning_status = result.status
     db.commit()
     return access
 

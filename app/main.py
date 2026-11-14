@@ -16,8 +16,8 @@ from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profil
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS
-from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections, reject_pending_software_requests
-from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, correct_legacy_access_requests
+from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections
+from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, verify_github_access, correct_legacy_access_requests
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
 from agent import UnsafeRequest, close_model_client
@@ -34,7 +34,6 @@ async def lifespan(app):
         correct_legacy_password_requests(db)
         correct_legacy_access_requests(db)
         close_legacy_rejections(db)
-        reject_pending_software_requests(db)
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
@@ -293,7 +292,7 @@ def retry_employee_action(request_id: int, user=Depends(get_current_user), db: S
     request = db.get(HelpdeskRequest, request_id)
     if not request or request.user_id != user.id:
         raise HTTPException(404, 'Request not found')
-    raise HTTPException(409, 'Software installation is not implemented yet')
+    raise HTTPException(409, 'This ticket does not have a retry action. Report Not resolved to request administrator follow-up.')
 
 @app.get("/requests/{request_id}/history", response_model=list[AuditOut], tags=["Requests"])
 def history(request_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
@@ -427,9 +426,19 @@ def task_result(task_id: int, payload: ResultIn, device=Depends(current_device),
     if not task:
         raise HTTPException(404, "Task not found")
     status = "COMPLETED" if payload.success else "FAILED"
-    result = ("Simulated installation completed; no OS changes made." if payload.success else "Endpoint installation failed.")
-    if not payload.simulated:
-        raise HTTPException(400, "This prototype accepts simulation results only")
+    if payload.success and (not payload.verified or payload.error_code):
+        raise HTTPException(400, "A successful installation requires endpoint verification")
+    if not payload.success and payload.verified:
+        raise HTTPException(400, "A failed installation cannot be marked verified")
+    failures = {
+        'UNSUPPORTED_OS': 'Live installation is supported only on Windows.',
+        'WINGET_UNAVAILABLE': 'Windows Package Manager is unavailable on the endpoint.',
+        'INSTALL_FAILED': 'The endpoint installer reported a failure.',
+        'TIMED_OUT': 'The endpoint installer timed out.',
+        'VERIFICATION_FAILED': 'The endpoint could not verify that the software is installed.',
+    }
+    result = ('Visual Studio Code installation verified on the endpoint.' if payload.success else
+              failures.get(payload.error_code or 'INSTALL_FAILED'))
     if task.status in ("COMPLETED", "FAILED"):
         if task.status == status and task.result == result:
             return task
@@ -445,7 +454,8 @@ def task_result(task_id: int, payload: ResultIn, device=Depends(current_device),
     task.request.message = (result + ' Waiting for an administrator to close this ticket.'
                             if request_status == 'AWAITING_ADMIN_CLOSE' else result)
     task.completed_at = now()
-    audit(db, task.request.user_id, "SOFTWARE_INSTALL_" + status, "request", task.request_id, request_status, "Simulation")
+    audit(db, task.request.user_id, "SOFTWARE_INSTALL_" + status, "request", task.request_id, request_status,
+          'Endpoint package check passed' if payload.success else (payload.error_code or 'INSTALL_FAILED'))
     db.commit()
     return task
 
@@ -635,3 +645,61 @@ def admin_access_decision(access_id: int, payload: AccessDecisionIn, user=Depend
           tags=['Admin application access'])
 def admin_retry_provisioning(access_id: int, user=Depends(require_admin), db: Session = Depends(get_db)):
     return retry_provisioning(db, access_id, user)
+
+@app.post('/admin/access/requests/{access_id}/provisioning/verify', response_model=AccessOut,
+          tags=['Admin application access'])
+def admin_verify_github_access(access_id: int, user=Depends(require_admin), db: Session = Depends(get_db)):
+    return verify_github_access(db, access_id, user)
+
+@app.get('/admin/github-identities', response_model=list[GitHubIdentityOut], tags=['Admin application access'])
+def github_identities(user=Depends(require_admin), db: Session = Depends(get_db)):
+    return db.scalars(select(GitHubIdentity).order_by(GitHubIdentity.user_id)).all()
+
+@app.put('/admin/users/{user_id}/github-identity', response_model=GitHubIdentityOut,
+         tags=['Admin application access'])
+def link_github_identity(user_id: int, payload: GitHubIdentityIn,
+                         user=Depends(require_admin), db: Session = Depends(get_db)):
+    import httpx
+    target = db.get(User, user_id)
+    if not target or target.role != 'employee':
+        raise HTTPException(404, 'Employee not found')
+    login = payload.github_login.lower()
+    try:
+        response = httpx.get('https://api.github.com/users/' + login, timeout=10,
+                             headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'AutoDeskAI-identity-check'})
+    except httpx.HTTPError:
+        raise HTTPException(503, 'GitHub identity lookup is unavailable') from None
+    if response.status_code in (403, 429) or response.status_code >= 500:
+        raise HTTPException(503, 'GitHub identity lookup is unavailable')
+    if response.status_code != 200:
+        raise HTTPException(422, 'GitHub user could not be verified')
+    try:
+        github_user = response.json()
+    except ValueError:
+        raise HTTPException(503, 'GitHub identity lookup is unavailable') from None
+    if github_user.get('type') != 'User':
+        raise HTTPException(422, 'GitHub user could not be verified')
+    github_id = github_user.get('id')
+    if not isinstance(github_id, int):
+        raise HTTPException(422, 'GitHub user could not be verified')
+    conflict = db.scalar(select(GitHubIdentity).where(GitHubIdentity.github_user_id == github_id,
+                                                       GitHubIdentity.user_id != user_id))
+    if conflict:
+        raise HTTPException(409, 'GitHub account is already linked to another employee')
+    identity = db.get(GitHubIdentity, user_id)
+    if identity and (identity.github_user_id != github_id or identity.github_login != login):
+        active = db.scalar(select(AccessRequest.id).where(AccessRequest.user_id == user_id,
+            AccessRequest.github_user_id == identity.github_user_id,
+            AccessRequest.status.in_(('APPROVED_PROVISIONING_REQUIRED', 'COMPLETED'))).limit(1))
+        if active:
+            raise HTTPException(409, 'Resolve existing GitHub access before changing this identity')
+    if not identity:
+        identity = GitHubIdentity(user_id=user_id, github_user_id=github_id, github_login=login,
+                                  confirmed_by=user.id)
+        db.add(identity)
+    else:
+        identity.github_user_id, identity.github_login, identity.confirmed_by = github_id, login, user.id
+        identity.confirmed_at = now()
+    audit(db, user.id, 'GITHUB_IDENTITY_CONFIRMED', 'user', user_id, 'COMPLETED', login)
+    db.commit()
+    return identity

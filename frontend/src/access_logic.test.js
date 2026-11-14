@@ -21,6 +21,9 @@ test('policy editor rejects invalid roles and removes read-only version', () => 
   });
   assert.throws(() => buildPolicyPayload({requestable_roles: ['viewer'], human_roles: ['admin'],
     default_duration_days: 30, max_duration_days: 90}), /Human approval/);
+  assert.throws(() => buildPolicyPayload({key: 'github', provider_type: 'GITHUB_ORG',
+    requestable_roles: ['viewer'], human_roles: [], approval_mode: 'ADMIN_ONLY',
+    default_duration_days: 30, max_duration_days: 90}), /GitHub organization/);
 });
 
 test('approval actions require a reason and status text is readable', () => {

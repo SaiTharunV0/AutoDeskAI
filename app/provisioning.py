@@ -1,4 +1,4 @@
-"""Provider boundary. Neither built-in provider can grant external permissions."""
+"""Provider boundary for simulated and verified external grants."""
 import json
 from dataclasses import dataclass
 
@@ -8,6 +8,7 @@ class ProvisioningResult:
     simulated: bool
     verified: bool
     detail: str
+    managed: bool = False
 
 class MockProvider:
     supported_operations = frozenset({'simulate_grant'})
@@ -23,7 +24,14 @@ class NoProvider:
     def provision(self, policy, access):
         return ProvisioningResult('NOT_CONFIGURED', False, False, 'No provider is configured')
 
-PROVIDERS = {'MOCK': MockProvider(), 'NONE': NoProvider()}
+class GitHubProvider:
+    def provision(self, policy, access):
+        from app.github_provider import GitHubOrganizationProvider
+        result = GitHubOrganizationProvider().provision(access)
+        return ProvisioningResult(result.status, False, result.verified,
+                                  'GitHub membership state checked', result.managed)
+
+PROVIDERS = {'MOCK': MockProvider(), 'NONE': NoProvider(), 'GITHUB_ORG': GitHubProvider()}
 
 def provision(policy, access):
     return PROVIDERS.get(policy.provider_type, NoProvider()).provision(policy, access)

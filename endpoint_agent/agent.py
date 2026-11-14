@@ -6,7 +6,7 @@ from endpoint_agent import config
 from endpoint_agent.api import AgentAPI
 from endpoint_agent.installer import install
 
-def run_once(api, device_id, simulation=True, pending=None):
+def run_once(api, device_id, pending=None):
     pending = pending if pending is not None else {}
     device = api.heartbeat()
     if device["device_id"] != device_id:
@@ -24,9 +24,9 @@ def run_once(api, device_id, simulation=True, pending=None):
         if task["device_id"] != device["id"] or task["status"] != "PROCESSING":
             raise ValueError("Task does not belong to this registered device")
         try:
-            result = install(task["software"], simulation)
+            result = install(task["software"])
         except ValueError:
-            result = {"success": False, "simulated": True}
+            result = {"success": False, "verified": False, "error_code": "INSTALL_FAILED"}
         pending[task["id"]] = result
         api.report(task["id"], result)
         del pending[task["id"]]
@@ -42,7 +42,7 @@ def main():
     try:
         while True:
             try:
-                run_once(api, config.DEVICE_ID, config.SIMULATION, pending)
+                run_once(api, config.DEVICE_ID, pending)
                 failures = 0
                 print("Heartbeat and task cycle completed.")
             except (httpx.HTTPError, ValueError):

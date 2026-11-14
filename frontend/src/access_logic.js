@@ -17,6 +17,10 @@ export function buildPolicyPayload(form) {
     throw new Error('Choose at least one role and a valid default duration.');
   if (payload.human_roles.some(role => !payload.requestable_roles.includes(role)))
     throw new Error('Human approval roles must be requestable.');
+  if (payload.provider_type === 'GITHUB_ORG' && (payload.key !== 'github' ||
+      payload.requestable_roles.length !== 1 || payload.requestable_roles[0] !== 'member' ||
+      payload.approval_mode !== 'ADMIN_ONLY'))
+    throw new Error('GitHub organization access requires the github application, member role, and administrator approval.');
   return payload;
 }
 

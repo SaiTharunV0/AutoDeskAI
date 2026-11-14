@@ -155,7 +155,9 @@ class DeviceEnrollment(BaseModel):
 
 class ResultIn(Input):
     success: bool
-    simulated: bool = True
+    verified: bool = False
+    error_code: Literal['UNSUPPORTED_OS', 'WINGET_UNAVAILABLE', 'INSTALL_FAILED',
+                        'TIMED_OUT', 'VERIFICATION_FAILED'] | None = None
 
 class PolicyIn(Input):
     enabled: bool
@@ -196,13 +198,15 @@ class ApplicationIn(Input):
     fallback: Literal['REQUIRE_ADMIN_APPROVAL', 'DENY'] = 'REQUIRE_ADMIN_APPROVAL'
     human_roles: list[str] = Field(default_factory=list)
     risk: Literal['LOW', 'MEDIUM', 'HIGH'] = 'LOW'
-    provider_type: Literal['MOCK', 'NONE'] = 'MOCK'
+    provider_type: Literal['MOCK', 'NONE', 'GITHUB_ORG'] = 'MOCK'
     config_ref: str = Field(default='', max_length=100, pattern=r'^[A-Z][A-Z0-9_]*$|^$')
     auto_allowed: bool = False
 
     @model_validator(mode='after')
     def policy_rules(self):
         roles = self.requestable_roles
+        if self.provider_type == 'GITHUB_ORG' and (self.key != 'github' or roles != ['member'] or self.approval_mode != 'ADMIN_ONLY'):
+            raise ValueError('GitHub organization provisioning requires the github catalog entry, member role, and administrator approval')
         if len(set(roles)) != len(roles) or any(not role or len(role) > 50 or not role.replace('_', '').replace('-', '').isalnum() for role in roles):
             raise ValueError('Use unique simple role names')
         if any(role not in roles for role in self.human_roles):
@@ -280,3 +284,18 @@ class AccessOut(BaseModel):
     provision_attempts: int
     last_provision_attempt_at: datetime | None
     provisioned_at: datetime | None
+    github_login: str | None = None
+    provider_managed: bool = False
+    provider_resource: str | None = None
+
+class GitHubIdentityIn(Input):
+    github_login: str = Field(min_length=1, max_length=39, pattern=r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$')
+    confirmed: Literal[True]
+
+class GitHubIdentityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    user_id: int
+    github_user_id: int
+    github_login: str
+    confirmed_by: int
+    confirmed_at: datetime

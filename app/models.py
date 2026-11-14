@@ -20,6 +20,14 @@ class User(Base):
     devices: Mapped[list["Device"]] = relationship(back_populates="owner")
     requests: Mapped[list["HelpdeskRequest"]] = relationship(back_populates="user")
 
+class GitHubIdentity(Base):
+    __tablename__ = 'github_identities'
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), primary_key=True)
+    github_user_id: Mapped[int] = mapped_column(unique=True)
+    github_login: Mapped[str] = mapped_column(String(39), unique=True)
+    confirmed_by: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    confirmed_at: Mapped[datetime] = mapped_column(default=now)
+
 class Device(Base):
     __tablename__ = "devices"
     __table_args__ = (Index("ix_devices_owner", "owner_user_id"),
@@ -92,6 +100,10 @@ class AccessRequest(Base):
     approver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     decision_at: Mapped[datetime | None] = mapped_column(nullable=True)
     provisioned_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    github_login: Mapped[str | None] = mapped_column(String(39), nullable=True)
+    github_user_id: Mapped[int | None] = mapped_column(nullable=True)
+    provider_managed: Mapped[bool] = mapped_column(default=False)
+    provider_resource: Mapped[str | None] = mapped_column(String(80), nullable=True)
     provision_attempts: Mapped[int] = mapped_column(default=0)
     last_provision_attempt_at: Mapped[datetime | None] = mapped_column(nullable=True)
     request: Mapped[HelpdeskRequest] = relationship(back_populates="access")

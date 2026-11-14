@@ -12,6 +12,7 @@ from app import main
 from app.database import Base, get_db, upgrade_user_profile, upgrade_query_indexes, upgrade_application_access
 from sqlalchemy.orm import sessionmaker
 from app.models import User, SoftwarePolicy, ApplicationPolicy, AccessRequest, AuditLog, Device, SoftwareTask, HelpdeskRequest, ChatRateLimitBucket, now
+from app.models import GitHubIdentity
 from app.access import correct_legacy_access_requests
 from app.provisioning import ProvisioningResult
 from app.workflows import correct_legacy_password_requests, expire_tasks
@@ -64,7 +65,7 @@ class WorkflowTests(unittest.TestCase):
                 json={"message": message, "idempotency_key": secrets.token_hex(16), **kwargs})
     def enroll(self, suffix="one"):
         response = self.client.post("/agent/register", headers=self.headers(self.admin),
-            json={"device_id": "test-" + suffix, "hostname": "test", "os_info": "Test",
+            json={"device_id": "test-" + suffix, "hostname": "test", "os_info": "Windows",
                   "owner_user_id": self.employee["user"]["id"]})
         self.assertEqual(response.status_code, 201)
         data = response.json()
@@ -388,6 +389,83 @@ class WorkflowTests(unittest.TestCase):
             headers=self.headers(self.admin), json={'decision': 'APPROVE',
             'reason': 'Approving my own request'}).status_code, 403)
 
+    def test_github_invitation_needs_acceptance_then_verified_grant(self):
+        from app.github_provider import GitHubResult
+        payload = self.access_policy_payload(requestable_roles=['member'], provider_type='GITHUB_ORG')
+        self.assertEqual(self.client.post('/admin/access/applications', headers=self.headers(self.admin),
+            json=payload).status_code, 201)
+        with self.sessions() as db:
+            db.add(GitHubIdentity(user_id=self.employee['user']['id'], github_user_id=123,
+                github_login='employee-gh', confirmed_by=self.admin['user']['id']))
+            db.commit()
+        submitted = self.client.post('/access/requests', headers=self.headers(), json={
+            'application':'github', 'requested_role':'member', 'duration_days':30,
+            'idempotency_key':secrets.token_hex(16)}).json()
+        with patch('app.github_provider.GitHubOrganizationProvider.provision', return_value=GitHubResult('PENDING_ACCEPTANCE', False, True)):
+            approved = self.client.post(f"/admin/access/requests/{submitted['id']}/decision",
+                headers=self.headers(self.admin), json={'decision':'APPROVE'}).json()
+        self.assertEqual(approved['provisioning_status'], 'PENDING_ACCEPTANCE')
+        self.assertEqual(approved['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        self.assertEqual(approved['github_login'], 'employee-gh')
+        with patch('app.github_provider.GitHubOrganizationProvider.verify', return_value=GitHubResult('GRANTED', False)):
+            unverified = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/verify",
+                headers=self.headers(self.admin)).json()
+        self.assertEqual(unverified['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        self.assertEqual(unverified['provisioning_status'], 'FAILED')
+        with patch('app.github_provider.GitHubOrganizationProvider.verify', return_value=GitHubResult('GRANTED', True, True)):
+            verified = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/verify",
+                headers=self.headers(self.admin)).json()
+        self.assertEqual(verified['status'], 'COMPLETED')
+        self.assertEqual(verified['provisioning_status'], 'GRANTED')
+        self.assertIsNotNone(verified['expires_at'])
+        notices = self.client.get('/notifications', headers=self.headers()).json()
+        self.assertEqual(sum(row['kind'] == 'ACCESS_GRANTED' for row in notices), 1)
+
+    def test_github_identity_link_requires_admin_confirmation_and_unique_account(self):
+        import httpx
+        user_id = self.employee['user']['id']
+        url = f'/admin/users/{user_id}/github-identity'
+        self.assertEqual(self.client.put(url, headers=self.headers(), json={
+            'github_login': 'employee-gh', 'confirmed': True}).status_code, 403)
+        self.assertEqual(self.client.put(url, headers=self.headers(self.admin), json={
+            'github_login': 'employee-gh', 'confirmed': False}).status_code, 422)
+        with patch('httpx.get', return_value=httpx.Response(200, json={
+            'id': 123, 'type': 'User', 'login': 'employee-gh'})):
+            response = self.client.put(url, headers=self.headers(self.admin), json={
+                'github_login': 'employee-gh', 'confirmed': True})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['github_user_id'], 123)
+            self.assertEqual(self.client.put(f"/admin/users/{self.other['user']['id']}/github-identity",
+                headers=self.headers(self.admin), json={
+                    'github_login': 'employee-gh', 'confirmed': True}).status_code, 409)
+        linked = self.client.get('/admin/github-identities', headers=self.headers(self.admin)).json()
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(linked[0]['user_id'], user_id)
+
+    def test_github_provider_only_invites_missing_verified_identity(self):
+        import httpx
+        from types import SimpleNamespace
+        from app.github_provider import GitHubOrganizationProvider
+        calls = []
+        def handler(request):
+            calls.append((request.method, request.url.path))
+            if request.url.path == '/users/employee-gh':
+                return httpx.Response(200, json={'id':123})
+            if request.url.path.endswith('/invitations'):
+                return httpx.Response(200, json=[])
+            if request.method == 'PUT':
+                return httpx.Response(200, json={'state':'pending'})
+            return httpx.Response(404)
+        provider = GitHubOrganizationProvider(org='AutoDeskAI', token='test-token', transport=httpx.MockTransport(handler))
+        access = SimpleNamespace(github_login='employee-gh', github_user_id=123,
+            provider_resource='AutoDeskAI', requested_role='member', provider_managed=False)
+        self.assertEqual(provider.provision(access).status, 'PENDING_ACCEPTANCE')
+        self.assertEqual(calls[-1], ('PUT','/orgs/AutoDeskAI/memberships/employee-gh'))
+        access.github_user_id = 999
+        calls.clear()
+        self.assertEqual(provider.provision(access).status, 'IDENTITY_MISMATCH')
+        self.assertFalse(any(method == 'PUT' for method, _ in calls))
+
     def test_application_access_migration_preserves_existing_rows(self):
         old = create_engine('sqlite://')
         with old.begin() as connection:
@@ -420,38 +498,41 @@ class WorkflowTests(unittest.TestCase):
             correct_legacy_access_requests(db)
             self.assertEqual(request.status, 'APPROVED_PROVISIONING_REQUIRED')
             self.assertEqual(request.access.provisioning_status, 'SIMULATED')
-    def test_software_installation_is_rejected_without_dispatch(self):
+    def test_live_software_installation_dispatch_and_resolution(self):
         device = self.enroll()
         row = self.request(Intent.SOFTWARE_INSTALL, "Install VS Code", software="vscode",
                            device_id=device["device"]["id"]).json()
-        self.assertEqual(row['status'], 'CLOSED')
-        self.assertEqual(row['rejection_source'], 'AUTODESKAI')
-        self.assertIn("isn't implemented yet", row['message'])
-        self.assertIsNone(row['task'])
+        self.assertEqual(row['status'], 'PENDING')
+        self.assertIn('installation is queued', row['message'])
+        self.assertEqual(row['task']['software'], 'vscode')
         self.assertIsNone(row['resolved'])
-        self.assertEqual(self.client.get('/agent/tasks', headers=device['headers']).json(), [])
+        tasks = self.client.get('/agent/tasks', headers=device['headers']).json()
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]['status'], 'PROCESSING')
+        self.assertEqual(self.client.post(f"/agent/tasks/{tasks[0]['id']}/result",
+            headers=device['headers'], json={'success': True, 'verified': False}).status_code, 400)
+        self.assertEqual(self.client.post(f"/agent/tasks/{tasks[0]['id']}/result",
+            headers=device['headers'], json={'success': True, 'simulated': True}).status_code, 422)
+        self.assertEqual(self.client.post(f"/agent/tasks/{tasks[0]['id']}/result",
+            headers=device['headers'], json={'success': True, 'verified': True}).status_code, 200)
+        self.assertEqual(self.client.get(f"/requests/{row['id']}", headers=self.headers()).json()['status'], 'COMPLETED')
+        self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution",
+            headers=self.headers(), json={'resolved': True}).json()['status'], 'CLOSED')
         self.assertEqual(self.client.post(f"/requests/{row['id']}/retry-action",
             headers=self.headers()).status_code, 409)
-        self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution",
-            headers=self.headers(), json={'resolved': True}).status_code, 409)
 
-    def test_unfinished_software_installation_is_closed_on_startup(self):
-        from app.workflows import reject_pending_software_requests
-        with self.sessions() as db:
-            row = HelpdeskRequest(user_id=self.employee['user']['id'], intent='SOFTWARE_INSTALL',
-                status='PENDING', message='Old simulation', idempotency_key=secrets.token_hex(16))
-            db.add(row)
-            db.flush()
-            db.add(SoftwareTask(request_id=row.id, device_id=self.enroll()['device']['id'],
-                software='vscode', status='PENDING'))
-            db.commit()
-            reject_pending_software_requests(db)
-            reject_pending_software_requests(db)
-            self.assertEqual(row.status, 'CLOSED')
-            self.assertEqual(row.rejection_source, 'AUTODESKAI')
-            self.assertEqual(row.task.status, 'REJECTED')
-            self.assertEqual(len(db.scalars(select(AuditLog).where(
-                AuditLog.resource_id == row.id, AuditLog.action == 'REJECTED_TICKET_CLOSED')).all()), 1)
+    def test_software_task_survives_startup(self):
+        device = self.enroll()
+        row = self.request(Intent.SOFTWARE_INSTALL, 'install vscode', software='vscode',
+                           device_id=device['device']['id']).json()
+        self.assertEqual(self.client.get(f"/requests/{row['id']}", headers=self.headers()).json()['status'], 'PENDING')
+        self.assertEqual(self.client.get('/agent/tasks', headers=device['headers']).json()[0]['software'], 'vscode')
+
+    def test_software_clarification_normalizes_requested_product(self):
+        prior = AgentResponse(intent=Intent.CLARIFICATION, message='Which software would you like to install?')
+        result = process_request('install vscode', prior)
+        self.assertEqual(result.intent, Intent.SOFTWARE_INSTALL)
+        self.assertEqual(result.software, 'vscode')
 
     def test_admin_can_reject_escalated_issue(self):
         with self.sessions() as db:
@@ -477,8 +558,14 @@ class WorkflowTests(unittest.TestCase):
     def test_unapproved_software_and_invalid_device(self):
         self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install malware",software="malware").json()["status"],"CLOSED")
         self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install vscode",software="vscode",device_id=999).json()["status"],"CLOSED")
+        device = self.enroll()
+        with self.sessions() as db:
+            db.get(Device, device['device']['id']).owner_user_id = self.other['user']['id']
+            db.commit()
+        self.assertEqual(self.request(Intent.SOFTWARE_INSTALL, 'install vscode', software='vscode',
+            device_id=device['device']['id']).json()['status'], 'CLOSED')
         with self.assertRaises(ValueError): install("powershell")
-        with self.assertRaises(ValueError): install("vscode",False)
+        self.assertEqual(install('vscode', system='Linux')['error_code'], 'UNSUPPORTED_OS')
     def test_command_and_secrets_rejected(self):
         with patch("app.workflows.process_request") as ai:
             response = self.client.post("/requests",headers=self.headers(),json={
@@ -737,6 +824,23 @@ class WorkflowTests(unittest.TestCase):
             expire_tasks(db)
             commit.assert_not_called()
 
+    def test_processing_timeout_starts_when_endpoint_claims_task(self):
+        from datetime import timedelta
+        device = self.enroll()
+        row = self.request(Intent.SOFTWARE_INSTALL, 'install vscode', software='vscode',
+                           device_id=device['device']['id']).json()
+        self.client.get('/agent/tasks', headers=device['headers'])
+        with self.sessions() as db:
+            task = db.get(SoftwareTask, row['task']['id'])
+            task.created_at = now() - timedelta(hours=2)
+            db.commit()
+            expire_tasks(db)
+            self.assertEqual(task.status, 'PROCESSING')
+            task.started_at = now() - timedelta(hours=2)
+            db.commit()
+            expire_tasks(db)
+            self.assertEqual(task.status, 'FAILED')
+
     def test_model_call_releases_database_connection(self):
         active = [0]
         def checkout(*args): active[0] += 1
@@ -773,6 +877,41 @@ class WorkflowTests(unittest.TestCase):
                 'identifier': identifier, 'password': self.password, 'expected_role': role}).status_code, 403)
 
 class EndpointEfficiencyTests(unittest.TestCase):
+    def test_windows_installer_uses_fixed_package_and_verifies_result(self):
+        from subprocess import CompletedProcess
+        from unittest.mock import Mock
+        runner = Mock(side_effect=[
+            CompletedProcess([], 0, '', ''),
+            CompletedProcess([], 0, 'Name  Id  Version\nVisual Studio Code  Microsoft.VisualStudioCode  1.0\n', ''),
+        ])
+        result = install('vscode', runner=runner, executable='winget.exe', system='Windows')
+        self.assertEqual(result, {'success': True, 'verified': True, 'error_code': None})
+        install_call, list_call = runner.call_args_list
+        self.assertEqual(install_call.args[0][0:4], ['winget.exe', 'install', '--id', 'Microsoft.VisualStudioCode'])
+        self.assertIn('--exact', install_call.args[0])
+        self.assertIn('--scope', install_call.args[0])
+        self.assertEqual(install_call.kwargs['shell'], False)
+        self.assertEqual(list_call.args[0][1], 'list')
+
+    def test_windows_installer_requires_verification_and_does_not_execute_unknown_software(self):
+        from subprocess import CompletedProcess
+        from unittest.mock import Mock
+        runner = Mock(side_effect=[CompletedProcess([], 0, '', ''), CompletedProcess([], 0, 'No installed package found', '')])
+        self.assertEqual(install('vscode', runner=runner, executable='winget.exe', system='Windows')['error_code'],
+                         'VERIFICATION_FAILED')
+        with self.assertRaises(ValueError):
+            install('malware', runner=runner, executable='winget.exe', system='Windows')
+        self.assertEqual(runner.call_count, 2)
+
+    def test_windows_installer_accepts_an_already_installed_verified_package(self):
+        from subprocess import CompletedProcess
+        from unittest.mock import Mock
+        runner = Mock(side_effect=[
+            CompletedProcess([], 1, '', 'already installed'),
+            CompletedProcess([], 0, 'Visual Studio Code  Microsoft.VisualStudioCode  1.0', ''),
+        ])
+        self.assertTrue(install('vscode', runner=runner, executable='winget.exe', system='Windows')['verified'])
+
     def test_heartbeat_identity_cache_expires(self):
         import httpx
         from endpoint_agent.api import AgentAPI
@@ -801,7 +940,7 @@ class EndpointEfficiencyTests(unittest.TestCase):
             api.tasks.return_value = []
             response = httpx.Response(status, request=httpx.Request('POST', 'https://example.test/result'))
             api.report.side_effect = httpx.HTTPStatusError('report rejected', request=response.request, response=response)
-            pending = {1: {'success': True, 'simulated': True}}
+            pending = {1: {'success': True, 'verified': True}}
             if status == 503:
                 with self.assertRaises(httpx.HTTPStatusError):
                     run_once(api, 'endpoint-test', pending=pending)

@@ -69,6 +69,10 @@ def upgrade_application_access(db_engine=engine):
             'provisioned_at': 'TIMESTAMP',
             'provision_attempts': 'INTEGER NOT NULL DEFAULT 0',
             'last_provision_attempt_at': 'TIMESTAMP',
+            'github_login': 'VARCHAR(39)',
+            'github_user_id': 'INTEGER',
+            'provider_managed': 'BOOLEAN NOT NULL DEFAULT FALSE',
+            'provider_resource': 'VARCHAR(80)',
         },
         'helpdesk_requests': {
             'resolved': 'BOOLEAN',

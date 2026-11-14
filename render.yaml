@@ -19,6 +19,10 @@ services:
         value: gemma4:31b
       - key: OLLAMA_API_KEY
         sync: false
+      - key: GITHUB_ORG
+        value: AutoDeskAI
+      - key: GITHUB_TOKEN
+        sync: false
       - key: OLLAMA_TIMEOUT
         value: "90"
       - key: CHAT_RATE_LIMIT_PER_MINUTE
@@ -30,7 +34,7 @@ services:
       - key: CHAT_MAX_MESSAGE_LENGTH
         value: "2000"
       - key: TASK_TIMEOUT_SECONDS
-        value: "600"
+        value: "1800"
       - key: DEVICE_OFFLINE_SECONDS
         value: "120"
       - key: MICROSOFT_SSPR_URL

@@ -74,7 +74,7 @@ def _resolve_pending_clarification(user_message, previous_response=None):
     if "which application" in text and "tableau" in user_message.split():
         return AgentResponse(intent=Intent.ACCESS_REQUEST, application=user_message.strip(), message="Access request identified.")
     if "which software" in text and "vscode" in user_message.split():
-        return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=user_message.strip(), message="Installation request identified.")
+        return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software="vscode", message="Installation request identified.")
     return None
 
 def process_request(user_message: str, previous_response: AgentResponse | None = None) -> AgentResponse:

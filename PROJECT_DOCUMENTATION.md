@@ -27,7 +27,7 @@ AutoDeskAI is a web-based service desk for a small, defined set of workplace IT 
 
 The assistant helps identify what the employee needs. The backend, rather than the language model, owns request creation, policy checks, status changes, access decisions, and audit records. This separation is central to the project: a conversational interface makes the service easier to use, while explicit rules control what the system can actually do.
 
-AutoDeskAI is a **prototype**, not a system that grants production application access or installs software. Application provisioning is simulated. Password changes and resets take place on Microsoft-hosted pages, and AutoDeskAI cannot independently verify whether they succeeded. New software installation requests are rejected because that workflow is not implemented.
+AutoDeskAI remains a **prototype**. GitHub organization membership can be invited and verified using a configured backend credential; other application provisioning is simulated or unconfigured. Password changes and resets take place on Microsoft-hosted pages, and AutoDeskAI cannot independently verify whether they succeeded. Approved Visual Studio Code requests install through WinGet on registered Windows endpoints and are verified by the agent.
 
 ## 2. Purpose and problem addressed
 
@@ -39,7 +39,7 @@ The project is intended to:
 2. Guide password requests to Microsoft's appropriate hosted experience without handling the employee's organization password.
 3. Apply configured rules to application access requests and route cases needing human judgment to an administrator.
 4. Keep a traceable record of requests, decisions, and employee-reported outcomes.
-5. Be honest about incomplete or unverified work instead of presenting a simulation as a real installation or access grant.
+5. Report an installation as complete only after the endpoint verifies the package, and keep application approval separate from a real access grant.
 
 ## 3. Who uses it
 
@@ -47,7 +47,7 @@ The project is intended to:
 | --- | --- |
 | Employee | Chat with the IT assistant, submit and track requests, use Microsoft password links, request application access, report whether an issue was resolved, and read access-decision notifications. |
 | Administrator | Review employee requests and escalations, manage the application catalog and its approval policies, approve or reject access requests, inspect request history, and manage registered devices. |
-| Endpoint agent | A separate simulation component that authenticates as a registered device and can report results for historical or test tasks. It receives no new installation tasks from the current employee software flow. |
+| Endpoint agent | A Windows component that authenticates as a registered device, installs approved Visual Studio Code through WinGet, and verifies the installed package. |
 
 Employees and administrators have separate portal views. An account must sign in through the appropriate role. Administrator registration requires a private backend invite code.
 
@@ -58,7 +58,7 @@ Employees and administrators have separate portal views. An account must sign in
 | Conversational support | Classifies supported requests, asks for clarification when needed, gives fixed help and status replies, and creates tracked tickets for supported workflows. | General-purpose questions are outside the assistant's scope. |
 | Password reset and change | Opens a request and offers the correct Microsoft-hosted action. The backend records when the employee chooses **Continue at Microsoft**. | AutoDeskAI does not receive the organization password or verify Microsoft's outcome. |
 | Application access | Evaluates a catalog policy; automatically approves, rejects, or sends a request for administrator review. | Approval means provisioning is required. Built-in provisioning never grants real access. |
-| Software installation | Explains that installation is unavailable, rejects the request, and closes it automatically. | No new endpoint installation task is created. |
+| Software installation | Queues approved Visual Studio Code installation on a selected connected Windows device; unsupported requests are rejected. | The agent installs through WinGet and checks the installed package before reporting success. |
 | Resolution and escalation | Employees report **Resolved** or **Not resolved** for requests that need their outcome. Unresolved requests may allow a password retry or go to an administrator. | Resolution is a person's report, not independent proof of a provider result. |
 | Notifications | Stores approval and rejection notices for access requests, including direct chat denials, and shows unread decisions as a visible notice and in the employee portal bell. | Notices are in the portal; the project does not send email or SMS. |
 | Audit and history | Shows administrators employee-created request records and lets them open the associated event history. | Internal login and policy events remain in the database but are not rows in the admin request list. |
@@ -68,7 +68,7 @@ Employees and administrators have separate portal views. An account must sign in
 1. **Sign in.** The employee signs in with a username or email and the AutoDeskAI account password. The browser restores the session after a reload within the same tab session.
 2. **Start a request.** The employee types in chat, uses a dashboard quick action, or opens the Application Access page. Every submitted chat message appears in the conversation before the assistant responds.
 3. **Clarify if necessary.** If the application or action is unclear, AutoDeskAI asks a targeted question. The employee's answer is checked against the pending request rather than silently starting unrelated work.
-4. **Follow the relevant action.** For a password request, the employee chooses **Continue at Microsoft**. For application access, the employee sees the policy outcome or waits for an administrator. A software installation request receives an immediate explanation and rejection.
+4. **Follow the relevant action.** For a password request, the employee chooses **Continue at Microsoft**. For application access, the employee sees the policy outcome or waits for an administrator. An approved software installation request waits for the Windows endpoint agent to install and verify the package.
 5. **Track progress.** My Requests shows request type, status, time, outcome, and details. The request timeline shows recorded events. Access decisions also appear in the notification bell.
 6. **Report the outcome when required.** Before starting another request, the employee can be asked whether the current issue was resolved. Rejected tickets are already closed and do not require this confirmation.
 
@@ -82,9 +82,9 @@ An employee says, “I forgot my password.” AutoDeskAI creates a password-rese
 
 An employee requests Tableau access. The backend checks the Tableau catalog entry, requested role, duration, and configured conditions. The policy may approve the request automatically, deny it, or require an administrator. If an administrator later approves or rejects it, the employee sees the updated request and a persistent portal notification. An approved result means **access still needs to be provisioned**; it is not a claim that Tableau permissions already exist.
 
-### Example: unavailable installation
+### Example: software installation
 
-An employee asks to install Visual Studio Code. AutoDeskAI explains that software installation is not implemented, records a rejection, and closes the ticket. It does not ask the employee to confirm a result and does not send an installation task to the endpoint agent.
+An employee selects a connected endpoint and asks to install Visual Studio Code. AutoDeskAI queues an installation task for that device. The agent runs WinGet and verifies the installed package, and the employee can report whether the issue was resolved.
 
 ## 6. How an administrator uses it
 
@@ -94,7 +94,7 @@ Administrators have a workspace for employee requests, access approvals, applica
 - **Access decisions:** See requests awaiting review and approve or reject them. Rejection requires a reason; administrators cannot decide their own access requests. A decision is recorded on the access request and in its event history, and the requester gets a notification.
 - **Policy configuration:** Add or edit catalog entries, allowed roles, durations, risk, approval mode, conditions, and fallback behavior. Each edit increments a policy version and stores a revision snapshot. Existing requests retain the version used when they were evaluated.
 - **Audit review:** The admin Audit Logs page presents employee-created requests with the employee's username and a link to request details and history. It is a request-centered view, not a list of every internal system event.
-- **Device administration:** Enroll and disable registered devices for the retained endpoint simulation. Enrollment returns an agent token once; the backend stores its digest.
+- **Device administration:** Enroll and disable registered Windows endpoints for software installation. Enrollment returns an agent token once; the backend stores its digest.
 
 ## 7. How the system works
 
@@ -108,7 +108,7 @@ flowchart LR
     API --> C[Bounded Ollama intent classifier]
     F --> M[Microsoft-hosted password pages]
     API --> P[Access policy evaluator]
-    P --> S[Mock or unconfigured provider]
+    P --> S[GitHub, mock, or unconfigured provider]
     D[Registered endpoint agent] --> API
 ```
 
@@ -127,7 +127,7 @@ flowchart TD
     I --> P{Intent}
     P -- Password --> MS[Create ticket and offer Microsoft action]
     P -- Access --> AC[Evaluate application policy]
-    P -- Software install --> R[Reject and close: unavailable]
+    P -- Software install --> SW[Queue approved Windows installation]
     P -- Help or status --> H[Reply without a new ticket]
     AC --> D{Policy decision}
     D -- Deny --> R2[Reject, close, and notify]
@@ -168,7 +168,7 @@ For a request needing employee confirmation, **Resolved** records the employee's
 | `application_policies` and `access_policy_revisions` | Current application rules and versioned snapshots of policy changes. |
 | `audit_logs` | Time-ordered workflow and decision events associated with resources such as requests. |
 | `user_notifications` | Access-decision notices for a specific requester, including read state. |
-| `devices` and `software_tasks` | Registered agent identities and retained simulation tasks. New installation requests do not create tasks. |
+| `devices` and `software_tasks` | Registered agent identities and installation tasks for approved software requests. |
 | `chat_rate_limit_buckets` | Per-user request counters used to enforce chat limits across backend instances. |
 
 User-facing request and notification APIs restrict employees to their own records. Administrator routes require the administrator role. Passwords are stored as hashes; endpoint tokens are stored as digests. The organization password is entered on Microsoft's site, not in AutoDeskAI. The browser keeps the AutoDeskAI access token and chat history in tab session storage. The backend does not store raw chat transcripts, though sanitized ticket descriptions and audit events are retained.
@@ -194,7 +194,7 @@ AutoDeskAI uses several layers of protection so that the chat interface cannot d
 - **Constrained model input:** The backend limits chat messages to 2,000 characters, rejects credential-like and command-like text, and sends only recognized workflow tokens to Ollama. Raw free text is not forwarded to the model. This reduces accidental disclosure and narrows the effect of prompt-injection attempts.
 - **Validated model output:** The model returns a structured intent that the backend validates. The backend, not the model's prose, chooses the workflow and checks the application catalog and policy. Unsupported and obvious out-of-scope requests receive fixed replies without a model call.
 - **Backend-owned authorization:** Requested application roles and durations are checked against the current policy. High-risk and human-only roles require an administrator. An administrator cannot decide their own access request. Unknown MFA, directory, or HR facts cannot be treated as verified approval conditions.
-- **No unverified success claim:** An approval remains `APPROVED_PROVISIONING_REQUIRED` until real access could be verified; the built-in provider never grants it. Opening a Microsoft password link is recorded as an action, not proof of completion. New software installation requests do not dispatch tasks.
+- **No unverified success claim:** An approval remains `APPROVED_PROVISIONING_REQUIRED` until real access could be verified; the built-in provider never grants it. Opening a Microsoft password link is recorded as an action, not proof of completion. Approved Visual Studio Code requests dispatch live Windows installation tasks; only an installed-package check can report success.
 - **Duplicate and sequence controls:** Client-generated idempotency keys protect against duplicate tickets after retries. The backend blocks a second tracked request while an earlier one remains open, and locks access records before an administrator decides them.
 - **Rate limits:** Persistent per-user counters limit chat submissions to 10 per minute and 60 per hour by default, with a separate limit for repeated out-of-scope attempts. A further limit restricts password requests to five per hour. The chat limit returns HTTP 429 with `Retry-After`.
 
@@ -228,13 +228,13 @@ These are **intended operational benefits**, not measured production results. Th
 | Persistence | PostgreSQL through SQLAlchemy; tickets, policies, decisions, notifications, and audit events. |
 | Intent classification | Configurable Ollama model, constrained to structured supported intents. |
 | External password action | Microsoft My Account and Microsoft Self-Service Password Reset pages. |
-| Endpoint simulation | Python agent with registered-device authentication and simulation-only installer. |
+| Endpoint installation | Python agent with registered-device authentication, fixed WinGet package mapping, and installed-package verification. |
 | Hosted setup | Vercel frontend with `/api` forwarded to the Render backend; backend connects to PostgreSQL and the configured Ollama service. |
 
 The repository's [README](README.md#run-locally) contains installation, configuration, local run, API, test, and deployment instructions. Environment secrets stay on the backend. The FastAPI OpenAPI documentation is available at `/docs` when the backend is running.
 
 ## 12. Current limitations and next steps
 
-The main limitations are product boundaries, not hidden features: no production application connector, no verified application grant, no real software installation, and no callback confirming Microsoft's password outcome. Notifications appear inside the employee portal rather than through email, SMS, or operating-system push. General knowledge ingestion and open-ended IT question answering are outside the current assistant scope. Chat history is tied to the browser tab session rather than stored across devices. Signup does not verify email ownership, and access tokens expire without a refresh-token flow.
+The main limitations are product boundaries, not hidden features: only GitHub organization membership has a live connector, and it requires backend credentials and identity confirmation; GitHub access expiry is recorded but not automatically enforced. Software installation covers Windows Visual Studio Code only, and there is no callback confirming Microsoft's password outcome. Notifications appear inside the employee portal rather than through email, SMS, or operating-system push. General knowledge ingestion and open-ended IT question answering are outside the current assistant scope. Chat history is tied to the browser tab session rather than stored across devices. Signup does not verify email ownership, and access tokens expire without a refresh-token flow.
 
-Before using the system as a production helpdesk, the team would need real provider integrations with verified results, stronger identity and account lifecycle controls, operational monitoring, recovery procedures, and evaluation with actual support cases. Any future software installation workflow should be implemented and tested separately rather than reusing the present simulation as if it were a live installer.
+Before using the system as a production helpdesk, the team would need real provider integrations with verified results, stronger identity and account lifecycle controls, operational monitoring, recovery procedures, and evaluation with actual support cases. Additional software or operating systems need separately reviewed package mappings and endpoint controls before being enabled.

@@ -1,4 +1,6 @@
-"""Live demo against running FastAPI, PostgreSQL and Ollama. Generated credentials stay in memory."""
+"""Explicit live demo against FastAPI, PostgreSQL, Ollama, and Windows WinGet."""
+import argparse
+import platform
 import secrets
 import httpx
 from sqlalchemy import select
@@ -9,6 +11,11 @@ from endpoint_agent.api import AgentAPI
 from endpoint_agent.agent import run_once
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--live-install', action='store_true', help='Install Visual Studio Code on this Windows machine')
+    args = parser.parse_args()
+    if not args.live_install or platform.system() != 'Windows':
+        raise SystemExit('Live demo requires --live-install on a Windows endpoint; this installs Visual Studio Code.')
     suffix = secrets.token_hex(5)
     password = secrets.token_urlsafe(24)
     with httpx.Client(base_url="http://127.0.0.1:8000", timeout=180) as client:
@@ -32,7 +39,7 @@ def main():
         employee_headers = {"Authorization":"Bearer " + employee["access_token"]}
         admin_headers = {"Authorization":"Bearer " + admin["access_token"]}
         response = client.post("/agent/register", headers=admin_headers, json={
-            "device_id":"demo-" + suffix, "hostname":"demo-pc", "os_info":"Test",
+            "device_id":"demo-" + suffix, "hostname":"demo-pc", "os_info":"Windows",
             "owner_user_id":employee["user"]["id"]})
         response.raise_for_status()
         enrollment = response.json()
@@ -53,17 +60,27 @@ def main():
         assert response.json()["status"] == "AWAITING_USER_ACTION"
         assert response.json()["url"] == "https://passwordreset.microsoftonline.com/"
         print("DEMO 1: Microsoft password reset link issued; completion unverified", flush=True)
+        client.post(f'/requests/{row["id"]}/resolution', headers=employee_headers,
+                    json={'resolved': True}).raise_for_status()
         row = request("Install VS Code.")
         assert row["intent"] == "SOFTWARE_INSTALL", row["intent"]
         assert row["status"] == "PENDING", row["status"]
         run_once(endpoint, enrollment["device"]["device_id"])
         response = client.get(f'/requests/{row["id"]}',headers=employee_headers)
         assert response.json()["status"] == "COMPLETED"
-        print("DEMO 2: endpoint installation simulation COMPLETED", flush=True)
+        print("DEMO 2: live endpoint installation verified", flush=True)
+        client.post(f'/requests/{row["id"]}/resolution', headers=employee_headers,
+                    json={'resolved': True}).raise_for_status()
         row = request("I need access to Tableau.")
         assert row["intent"] == "ACCESS_REQUEST", row["intent"]
-        assert row["status"] == "COMPLETED", row["status"]
-        print("DEMO 3: backend application policy APPROVED (simulation)", flush=True)
+        assert row["status"] == "AWAITING_ADMIN", row["status"]
+        access = client.get('/access/requests', headers=employee_headers).json()[0]
+        decision = client.post(f'/admin/access/requests/{access["id"]}/decision',
+            headers=admin_headers, json={'decision': 'APPROVE', 'reason': 'Demo approval'})
+        decision.raise_for_status()
+        client.post(f'/requests/{row["id"]}/resolution', headers=employee_headers,
+                    json={'resolved': True}).raise_for_status()
+        print("DEMO 3: backend application policy approved (provisioning unverified)", flush=True)
         assert client.get("/requests").status_code == 401
         assert client.get("/admin/users",headers=employee_headers).status_code == 403
         assert client.post("/requests",headers=employee_headers,json={
@@ -72,7 +89,7 @@ def main():
         assert client.get("/openapi.json").json()["paths"]["/agent/tasks"]
         with SessionLocal() as db:
             rows = db.scalars(select(HelpdeskRequest).where(HelpdeskRequest.id.in_(request_ids))).all()
-            assert len(rows) == 3 and all(row.status == "COMPLETED" for row in rows)
+            assert len(rows) == 3 and all(row.status == "CLOSED" for row in rows)
             events = db.scalars(select(AuditLog).where(AuditLog.resource_type == "request",
                                AuditLog.resource_id.in_(request_ids))).all()
             assert len(events) >= 7
