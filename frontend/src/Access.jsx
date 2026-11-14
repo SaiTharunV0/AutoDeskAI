@@ -43,7 +43,7 @@ export function EmployeeAccess({api, onContinueChat}) {
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const current = applications.find(item => item.key === selected);
   useEffect(() => {let live = true; Promise.all([api('/access/applications'), api('/access/requests'), api('/requests')])
-    .then(([apps, rows, allTickets]) => {if (live) {setApplications(apps);setRequests(rows);setTickets(allTickets);}})
+    .then(([apps, rows, allTickets]) => {if (live) {setApplications(apps);setRequests(rows);setTickets(allTickets);const github = apps.find(item => item.key === 'github' && item.provider_type === 'GITHUB_ORG');if (github) {setSelected('github');setRole(github.requestable_roles[0] || 'member');setDays(github.default_duration_days);}}})
     .catch(err => {if (live) setError(err.message)})
     .finally(() => {if (live) setLoading(false)}); return () => {live = false};}, [api]);
   const openTicket = [...tickets].reverse().find(row => !['CLOSED', 'REJECTED'].includes(row.status));
