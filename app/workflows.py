@@ -122,6 +122,14 @@ def create_workflow(db, user, payload):
                        for alias in aliases)), None)
             if not clarification_application:
                 return ChatOut(message=f"Let's finish your current access request first. {prior.message}")
+            if clarification_application == 'github':
+                prior.status = 'CLOSED'
+                prior.message = ('To request GitHub organization access, open Application Access, choose GitHub, '
+                                 'and enter your GitHub username. An administrator will review your request.')
+                audit(db, user.id, 'CLARIFICATION_ROUTED_TO_ACCESS_FORM', 'request', prior.id,
+                      'CLOSED', 'GitHub access requires employee-supplied username')
+                db.commit()
+                return prior
             safe = f'access {clarification_application}'
     # All work so far is read-only. Return the pooled connection while the model
     # runs; a slow model call should not monopolize a PostgreSQL connection.
@@ -216,7 +224,7 @@ def create_workflow(db, user, payload):
         if result.message == "Please request one workflow at a time.":
             request.message = result.message
         elif "access" in safe or (previous and "application" in previous.message):
-            request.message = "Which application do you need access to? I can help you request Tableau access."
+            request.message = "Which application do you need access to? For GitHub, use Application Access to enter your GitHub username."
         elif any(word in safe.split() for word in ("install", "installed", "setup", "download")):
             request.message = "Which software would you like to install? I can help with Visual Studio Code."
         else:

@@ -766,6 +766,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post('/requests', headers=self.headers(), json={
             'message':'I forgot my password', 'idempotency_key':secrets.token_hex(16)}).status_code, 409)
 
+    def test_github_clarification_reply_routes_to_employee_form(self):
+        row = self.request(Intent.CLARIFICATION, 'i need access').json()
+        response = self.client.post('/requests', headers=self.headers(), json={
+            'message': 'github', 'previous_request_id': row['id'],
+            'idempotency_key': secrets.token_hex(16)})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['status'], 'CLOSED')
+        self.assertIn('enter your GitHub username', response.json()['message'])
+        self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), 1)
+
     def test_password_hash_and_no_credentials_in_audits(self):
         with self.sessions() as db:
             user=db.get(User,self.employee['user']['id'])
