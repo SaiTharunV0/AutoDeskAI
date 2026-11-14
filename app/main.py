@@ -586,7 +586,8 @@ def requestable_applications(user=Depends(get_current_user), db: Session = Depen
 def create_access_request(payload: AccessSubmit, user=Depends(get_current_user),
                           db: Session = Depends(get_db)):
     return submit_access(db, user, payload.application, payload.requested_role,
-        payload.justification, payload.duration_days, payload.idempotency_key)
+        payload.justification, payload.duration_days, payload.idempotency_key,
+        github_login=payload.github_login)
 
 @app.get('/access/requests', response_model=list[AccessOut], tags=['Application access'])
 def my_access_requests(user=Depends(get_current_user), db: Session = Depends(get_db)):

@@ -442,6 +442,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(linked), 1)
         self.assertEqual(linked[0]['user_id'], user_id)
 
+    def test_employee_submits_github_username_for_admin_review(self):
+        import httpx
+        payload = self.access_policy_payload(requestable_roles=['member'], provider_type='GITHUB_ORG')
+        self.assertEqual(self.client.post('/admin/access/applications', headers=self.headers(self.admin),
+            json=payload).status_code, 201)
+        request = {'application': 'github', 'requested_role': 'member', 'duration_days': 30,
+                   'idempotency_key': secrets.token_hex(16), 'github_login': 'employee-gh'}
+        with patch('httpx.get', return_value=httpx.Response(200, json={
+            'id': 123, 'type': 'User', 'login': 'employee-gh'})):
+            submitted = self.client.post('/access/requests', headers=self.headers(), json=request)
+        self.assertEqual(submitted.status_code, 201)
+        self.assertEqual(submitted.json()['status'], 'AWAITING_ADMIN')
+        self.assertEqual(submitted.json()['github_login'], 'employee-gh')
+        self.assertEqual(submitted.json()['provisioning_status'], 'NOT_STARTED')
+
     def test_github_provider_only_invites_missing_verified_identity(self):
         import httpx
         from types import SimpleNamespace

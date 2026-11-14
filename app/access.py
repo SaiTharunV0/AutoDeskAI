@@ -109,7 +109,7 @@ def evaluate(row, user, requested_role, justification, duration_days):
             'evaluated_at': now().isoformat() + 'Z', 'actor': 'POLICY_EVALUATOR'}
 
 def submit_access(db, user, application, requested_role, justification, duration_days, idempotency_key,
-                  existing_request=None):
+                  existing_request=None, github_login=None):
     # Serialize submissions for one requester in PostgreSQL; the request key also
     # protects retries when the first response is lost.
     db.scalar(select(User).where(User.id == user.id).with_for_update())
@@ -121,7 +121,8 @@ def submit_access(db, user, application, requested_role, justification, duration
         if (existing.access.application != application.lower().strip()
                 or existing.access.requested_role != requested_role
                 or existing.access.justification != justification.strip()
-                or existing.access.duration_days != duration_days):
+                or existing.access.duration_days != duration_days
+                or github_login and existing.access.github_login != github_login.lower()):
             raise HTTPException(409, 'Idempotency key was reused with different request details')
         return existing.access
     if not existing_request:
@@ -159,8 +160,25 @@ def submit_access(db, user, application, requested_role, justification, duration
     db.add(request)
     db.flush()
     identity = db.get(GitHubIdentity, user.id) if row.provider_type == 'GITHUB_ORG' else None
-    if row.provider_type == 'GITHUB_ORG' and not identity:
-        raise HTTPException(409, 'An administrator must verify your GitHub account before this request')
+    login = github_login.lower() if github_login else identity.github_login if identity else None
+    github_id = identity.github_user_id if identity and identity.github_login == login else None
+    if row.provider_type == 'GITHUB_ORG':
+        if not login:
+            raise HTTPException(422, 'Enter your GitHub username to request access')
+        if github_id is None:
+            import httpx
+            try:
+                response = httpx.get('https://api.github.com/users/' + login, timeout=10,
+                    headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'AutoDeskAI-identity-check'})
+            except httpx.HTTPError:
+                raise HTTPException(503, 'GitHub identity lookup is unavailable') from None
+            if response.status_code != 200:
+                raise HTTPException(503 if response.status_code in (403, 429) or response.status_code >= 500 else 422,
+                    'GitHub identity lookup is unavailable' if response.status_code in (403, 429) or response.status_code >= 500 else 'GitHub username was not found')
+            account = response.json()
+            if account.get('type') != 'User' or not isinstance(account.get('id'), int):
+                raise HTTPException(422, 'GitHub username was not found')
+            github_id = account['id']
     import os
     access = AccessRequest(request_id=request.id, user_id=user.id, application=row.key,
         requested_role=requested_role, justification=justification.strip(), duration_days=duration_days,
@@ -168,9 +186,8 @@ def submit_access(db, user, application, requested_role, justification, duration
         policy_version=row.version, evaluation_json=json.dumps(evaluation, sort_keys=True),
         decision_reason=reason, provisioning_status='NOT_STARTED',
         decision_at=now() if status != 'AWAITING_ADMIN' else None,
-        github_login=identity.github_login if identity else None,
-        github_user_id=identity.github_user_id if identity else None,
-        provider_resource=os.getenv('GITHUB_ORG', '') if identity else None)
+        github_login=login, github_user_id=github_id,
+        provider_resource=os.getenv('GITHUB_ORG', '') if row.provider_type == 'GITHUB_ORG' else None)
     db.add(access)
     if status == 'APPROVED_PROVISIONING_REQUIRED':
         attempt_provision(db, row, access)

@@ -238,6 +238,7 @@ class AccessSubmit(Input):
     justification: str = Field(default='', max_length=500)
     duration_days: int = Field(ge=1, le=365)
     idempotency_key: str = Field(min_length=8, max_length=100)
+    github_login: str | None = Field(default=None, max_length=39, pattern=r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$')
 
 class AccessDecisionIn(Input):
     decision: Literal['APPROVE', 'REJECT']
