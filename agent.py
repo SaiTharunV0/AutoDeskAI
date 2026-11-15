@@ -58,7 +58,7 @@ def safe_message(text: str) -> str:
     for key in (*APPLICATIONS, *EXAMPLE_APPLICATIONS):
         if re.search(r"\b" + re.escape(key) + r"\b", lowered):
             tokens.append(key)
-    unknown = set(words) - permitted - {"vscode", "vs", "code", "visual", "studio", "tableau", "github", "jira", "powerbi",
+    unknown = set(words) - permitted - {"vscode", "vs", "code", "visual", "studio", "github", "jira",
         "can", "you", "could", "would", "like", "a", "an", "the", "some", "something",
         "software", "application", "app", "system", "computer", "laptop", "device", "it"}
     if unknown and any(word in tokens for word in ("install", "installed", "setup", "download")) and "vscode" not in tokens:
@@ -71,7 +71,7 @@ def _resolve_pending_clarification(user_message, previous_response=None):
     if previous_response is None or previous_response.intent != Intent.CLARIFICATION:
         return None
     text = previous_response.message.lower()
-    if "which application" in text and any(key in user_message.split() for key in ("github", "jira", "tableau")):
+    if "which application" in text and any(key in user_message.split() for key in ("github", "jira")):
         return AgentResponse(intent=Intent.ACCESS_REQUEST, application=user_message.strip(), message="Access request identified.")
     if "which software" in text and "vscode" in user_message.split():
         return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software="vscode", message="Installation request identified.")
@@ -91,7 +91,7 @@ def _workflow_fallback(safe):
         return validate_agent_response(AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=target,
             message='Software installation requested.'), safe)
     if words & {'access', 'permission', 'grant'}:
-        target = next((key for key in ('github', 'jira', 'tableau') if key in words),
+        target = next((key for key in ('github', 'jira') if key in words),
                       'unknown_application' if 'unknown_application' in words else None)
         return validate_agent_response(AgentResponse(intent=Intent.ACCESS_REQUEST, application=target,
             message='Application access requested.'), safe)

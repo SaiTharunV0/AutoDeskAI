@@ -55,7 +55,6 @@ def attempt_provision(db, policy, access):
         access.status = 'COMPLETED'
         access.request.status = 'CLOSED' if access.approver_id else 'COMPLETED'
         access.request.message = ('GitHub organization membership was verified.' if policy.provider_type == 'GITHUB_ORG'
-                                  else 'Tableau site access was verified.' if policy.provider_type == 'TABLEAU'
                                   else 'Jira group and product access were verified.' if policy.provider_type == 'JIRA'
                                   else 'Application access was verified.') + (' This ticket is closed.' if access.approver_id else ' Report whether you can use the access.')
         db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
@@ -96,8 +95,6 @@ def retire_application_catalog_entries(db):
 def save_policy(db, row, payload, actor_id):
     if payload.provider_type == 'GITHUB_ORG' and (payload.key != 'github' or payload.requestable_roles != ['member'] or payload.approval_mode != 'ADMIN_ONLY'):
         raise HTTPException(422, 'GitHub provider requires the github application, member role, and administrator approval')
-    if payload.provider_type == 'TABLEAU' and (payload.key != 'tableau' or payload.approval_mode != 'ADMIN_ONLY' or payload.auto_allowed):
-        raise HTTPException(422, 'Tableau provider requires the tableau application and administrator approval')
     if payload.provider_type == 'JIRA' and (payload.key != 'jira' or payload.approval_mode != 'ADMIN_ONLY' or payload.auto_allowed):
         raise HTTPException(422, 'Jira provider requires the jira application and administrator approval')
     values = payload.model_dump(exclude={'key'})
@@ -168,7 +165,7 @@ def submit_access(db, user, application, requested_role, justification, duration
         if open_ticket:
             raise HTTPException(409, 'Please finish your current request and confirm whether it worked before starting another.')
     row = db.get(ApplicationPolicy, application.lower().strip())
-    if not row or not row.enabled:
+    if not row or not row.enabled or row.key in HIDDEN_APPLICATIONS:
         raise HTTPException(404, 'Application is unavailable')
     if row.required_role == 'admin' and user.role != 'admin':
         raise HTTPException(403, 'Application is restricted to administrators')
@@ -224,7 +221,6 @@ def submit_access(db, user, application, requested_role, justification, duration
         decision_at=now() if status != 'AWAITING_ADMIN' else None,
         github_login=login, github_user_id=github_id,
         provider_resource=os.getenv('GITHUB_ORG', '') if row.provider_type == 'GITHUB_ORG' else
-                          os.getenv('TABLEAU_SITE_CONTENT_URL', '') if row.provider_type == 'TABLEAU' else
                           urlsplit(os.getenv('JIRA_SITE_URL', '')).hostname if row.provider_type == 'JIRA' else None)
     db.add(access)
     if status == 'APPROVED_PROVISIONING_REQUIRED':

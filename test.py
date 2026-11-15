@@ -44,7 +44,7 @@ class WorkflowTests(unittest.TestCase):
         with self.sessions() as db:
             db.get(User, self.admin["user"]["id"]).role = "admin"
             db.add(SoftwarePolicy(key="vscode"))
-            db.add(ApplicationPolicy(key="tableau"))
+            db.add(ApplicationPolicy(key="reports"))
             db.commit()
     def tearDown(self):
         self.client.close()
@@ -242,9 +242,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("Legacy simulation", updated["message"])
     def test_access_policy_and_unknown_application(self):
         self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access unknown",application="unknown").json()["status"],"CLOSED")
-        self.client.put("/admin/applications/tableau",headers=self.headers(self.admin),
+        self.client.put("/admin/applications/reports",headers=self.headers(self.admin),
                         json={"enabled":True,"required_role":"admin"})
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Tableau",application="Tableau").json()["status"],"CLOSED")
+        self.assertEqual(self.request(Intent.ACCESS_REQUEST,"access Reports",application="Reports").json()["status"],"CLOSED")
 
     def test_rejected_ticket_closes_without_employee_confirmation(self):
         row = self.request(Intent.ACCESS_REQUEST, 'how can i request access to youtube', application='unknown').json()
@@ -266,7 +266,7 @@ class WorkflowTests(unittest.TestCase):
     def test_admin_rejection_closes_parent_ticket(self):
         from app.access import decide_access
         row = self.client.post('/access/requests', headers=self.headers(), json={
-            'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
+            'application': 'reports', 'requested_role': 'viewer', 'duration_days': 30,
             'idempotency_key': secrets.token_hex(16)}).json()
         with self.sessions() as db:
             access = decide_access(db, row['id'], db.get(User, self.admin['user']['id']), 'DENY', 'Not authorised')
@@ -290,7 +290,7 @@ class WorkflowTests(unittest.TestCase):
     def test_prior_admin_approval_is_closed_once(self):
         from app.access import decide_access, close_prior_admin_approvals
         row = self.client.post('/access/requests', headers=self.headers(), json={
-            'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
+            'application': 'reports', 'requested_role': 'viewer', 'duration_days': 30,
             'idempotency_key': secrets.token_hex(16)}).json()
         with self.sessions() as db:
             decide_access(db, row['id'], db.get(User, self.admin['user']['id']), 'APPROVE', '')
@@ -309,8 +309,8 @@ class WorkflowTests(unittest.TestCase):
 
     def test_confirmation_blocks_new_chat_and_access_requests(self):
         row = self.request(Intent.PASSWORD_RESET, 'forgot password').json()
-        self.assertEqual(self.request(Intent.ACCESS_REQUEST, 'access Tableau', application='tableau').status_code, 409)
-        payload = {'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
+        self.assertEqual(self.request(Intent.ACCESS_REQUEST, 'access Reports', application='reports').status_code, 409)
+        payload = {'application': 'reports', 'requested_role': 'viewer', 'duration_days': 30,
                    'idempotency_key': secrets.token_hex(16)}
         self.assertEqual(self.client.post('/access/requests', headers=self.headers(), json=payload).status_code, 409)
         self.assertEqual(self.client.post(f"/requests/{row['id']}/resolution", headers=self.headers(),
@@ -358,15 +358,18 @@ class WorkflowTests(unittest.TestCase):
         revisions = self.client.get('/admin/access/applications/github/revisions', headers=self.headers(self.admin)).json()
         self.assertEqual([item['version'] for item in revisions], [2, 1])
 
-    def test_tableau_and_powerbi_are_removed_from_employee_catalog(self):
+    def test_retired_applications_are_removed_from_catalogs(self):
         from app.access import retire_application_catalog_entries
+        from app.catalog import HIDDEN_APPLICATIONS
+        retired = sorted(HIDDEN_APPLICATIONS)
         with self.sessions() as db:
-            db.add(ApplicationPolicy(key='powerbi', display_name='Power BI'))
+            for key in retired:
+                db.add(ApplicationPolicy(key=key, display_name='Retired'))
             db.commit()
             retire_application_catalog_entries(db)
             db.commit()
             versions = {key: db.get(ApplicationPolicy, key).version
-                        for key in ('tableau', 'powerbi')}
+                        for key in retired}
             self.assertTrue(all(not db.get(ApplicationPolicy, key).enabled
                                 for key in versions))
             retire_application_catalog_entries(db)
@@ -374,13 +377,18 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(versions, {key: db.get(ApplicationPolicy, key).version
                                         for key in versions})
         employee_catalog = self.client.get('/access/applications', headers=self.headers()).json()
-        self.assertFalse({'tableau', 'powerbi'} & {item['key'] for item in employee_catalog})
+        self.assertFalse(set(retired) & {item['key'] for item in employee_catalog})
+        general_catalog = self.client.get('/catalog', headers=self.headers()).json()['applications']
+        self.assertFalse(set(retired) & {item['key'] for item in general_catalog})
         admin_catalog = self.client.get('/admin/access/applications',
                                         headers=self.headers(self.admin)).json()
-        self.assertFalse({'tableau', 'powerbi'} & {item['key'] for item in admin_catalog})
+        self.assertFalse(set(retired) & {item['key'] for item in admin_catalog})
         self.assertEqual(self.client.post('/admin/access/applications',
             headers=self.headers(self.admin), json=self.access_policy_payload(
-                key='powerbi')).status_code, 409)
+                key=retired[0])).status_code, 409)
+        self.assertEqual(self.client.put(f'/admin/access/applications/{retired[0]}',
+            headers=self.headers(self.admin), json=self.access_policy_payload(
+                key=retired[0])).status_code, 404)
 
     def test_access_policy_automatic_and_unverified_fallback(self):
         payload = self.access_policy_payload(approval_mode='CONDITIONAL', auto_allowed=True,
@@ -536,64 +544,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(verified['expires_at'])
         notices = self.client.get('/notifications', headers=self.headers()).json()
         self.assertEqual(sum(row['kind'] == 'ACCESS_GRANTED' for row in notices), 1)
-
-    def test_tableau_requires_admin_and_verified_site_role(self):
-        from app.tableau_provider import TableauResult
-        payload = self.access_policy_payload(key='tableau', requestable_roles=['viewer'],
-            provider_type='TABLEAU')
-        self.assertEqual(self.client.put('/admin/access/applications/tableau',
-            headers=self.headers(self.admin), json=payload).status_code, 200)
-        submitted = self.client.post('/access/requests', headers=self.headers(), json={
-            'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
-            'idempotency_key': secrets.token_hex(16)}).json()
-        self.assertEqual(submitted['status'], 'AWAITING_ADMIN')
-        with patch('app.tableau_provider.TableauCloudProvider.provision',
-                   return_value=TableauResult('ROLE_MISMATCH')):
-            approved = self.client.post(f"/admin/access/requests/{submitted['id']}/decision",
-                headers=self.headers(self.admin), json={'decision': 'APPROVE'}).json()
-        self.assertEqual(approved['provisioning_status'], 'ROLE_MISMATCH')
-        self.assertEqual(approved['status'], 'APPROVED_PROVISIONING_REQUIRED')
-        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
-            headers=self.headers()).json()['status'], 'CLOSED')
-        with patch('app.tableau_provider.TableauCloudProvider.provision',
-                   return_value=TableauResult('GRANTED', True, True)):
-            retried = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/retry",
-                headers=self.headers(self.admin)).json()
-        self.assertEqual(retried['status'], 'COMPLETED')
-        self.assertEqual(retried['provisioning_status'], 'GRANTED')
-        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
-            headers=self.headers()).json()['status'], 'CLOSED')
-        self.assertTrue(retried['provider_managed'])
-
-    def test_tableau_provider_checks_assigned_role_and_identity(self):
-        import httpx
-        from types import SimpleNamespace
-        from app.tableau_provider import TableauCloudProvider
-        calls = []
-        assigned = {'role': 'Unlicensed'}
-        def handler(request):
-            calls.append((request.method, request.url.path))
-            if request.url.path.endswith('/auth/signin'):
-                return httpx.Response(200, json={'credentials': {'token': 'session',
-                    'site': {'id': 'site-id', 'contentUrl': 'example'}}})
-            if request.method == 'GET' and request.url.path.endswith('/users'):
-                return httpx.Response(200, json={'users': {'user': []}})
-            if request.method == 'POST' and request.url.path.endswith('/users'):
-                return httpx.Response(201, json={'user': {'id': 'user-id',
-                    'name': 'employee@example.com', 'siteRole': assigned['role']}})
-            return httpx.Response(200, json={'user': {'id': 'user-id',
-                'name': 'employee@example.com', 'siteRole': assigned['role']}})
-        policy = SimpleNamespace(requestable_roles_json='["viewer"]')
-        access = SimpleNamespace(application='tableau', requested_role='viewer',
-            provider_resource='example', request=SimpleNamespace(
-                user=SimpleNamespace(email='employee@example.com')))
-        provider = TableauCloudProvider(host='https://prod-ca-a.online.tableau.com',
-            site='example', pat_name='name', pat_secret='secret',
-            role_map='{"viewer":"Viewer"}', transport=httpx.MockTransport(handler))
-        self.assertEqual(provider.provision(policy, access).status, 'ROLE_MISMATCH')
-        assigned['role'] = 'Viewer'
-        self.assertEqual(provider.provision(policy, access).status, 'GRANTED')
-        self.assertIn(('GET', '/api/3.29/sites/site-id/users/user-id'), calls)
 
     def test_jira_requires_admin_and_verified_group(self):
         from app.jira_provider import JiraResult
@@ -776,13 +726,13 @@ class WorkflowTests(unittest.TestCase):
             connection.execute(text('CREATE TABLE audit_logs (resource_type VARCHAR(40), resource_id INTEGER, action VARCHAR(80), timestamp TIMESTAMP)'))
             connection.execute(text("INSERT INTO audit_logs VALUES ('request', 1, 'PASSWORD_RESET_LINK_OPENED', CURRENT_TIMESTAMP)"))
             connection.execute(text('CREATE TABLE application_policies (key VARCHAR(80) PRIMARY KEY, enabled BOOLEAN, required_role VARCHAR(30))'))
-            connection.execute(text("INSERT INTO application_policies VALUES ('tableau', 1, 'employee')"))
+            connection.execute(text("INSERT INTO application_policies VALUES ('reports', 1, 'employee')"))
             connection.execute(text('CREATE TABLE access_requests (id INTEGER PRIMARY KEY, request_id INTEGER, user_id INTEGER, application VARCHAR(80), status VARCHAR(30), decision_reason VARCHAR(200), created_at TIMESTAMP)'))
-            connection.execute(text("INSERT INTO access_requests VALUES (1, 1, 1, 'tableau', 'COMPLETED', 'Legacy demo', CURRENT_TIMESTAMP)"))
+            connection.execute(text("INSERT INTO access_requests VALUES (1, 1, 1, 'reports', 'COMPLETED', 'Legacy demo', CURRENT_TIMESTAMP)"))
         upgrade_application_access(old)
         upgrade_application_access(old)
         with old.connect() as connection:
-            self.assertEqual(connection.execute(text("SELECT display_name FROM application_policies WHERE key='tableau'")).scalar(), 'Tableau (example)')
+            self.assertEqual(connection.execute(text("SELECT display_name FROM application_policies WHERE key='reports'")).scalar(), '')
             self.assertEqual(connection.execute(text('SELECT requested_role FROM access_requests WHERE id=1')).scalar(), 'viewer')
             self.assertIsNotNone(connection.execute(text('SELECT password_action_opened_at FROM helpdesk_requests WHERE id=1')).scalar())
         old.dispose()
@@ -794,7 +744,7 @@ class WorkflowTests(unittest.TestCase):
             db.add(request)
             db.flush()
             db.add(AccessRequest(request_id=request.id, user_id=request.user_id,
-                application='tableau', status='COMPLETED',
+                application='reports', status='COMPLETED',
                 decision_reason='Access approved in the demo policy service; no external application was provisioned.'))
             db.commit()
             correct_legacy_access_requests(db)
@@ -1084,11 +1034,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(row['status'],'NEEDS_CLARIFICATION')
         with patch('app.workflows.process_request') as ai:
             response=self.client.post('/requests',headers=self.headers(self.other),json={
-                'message':'Tableau','previous_request_id':row['id'],'idempotency_key':'stolen-context'})
+                'message':'Reports','previous_request_id':row['id'],'idempotency_key':'stolen-context'})
             self.assertEqual(response.status_code,404)
             ai.assert_not_called()
         with self.sessions() as db:
-            db.add(ApplicationPolicy(key='powerbi', display_name='Power BI (example)'))
+            db.add(ApplicationPolicy(key='jira', display_name='Jira (example)'))
             db.commit()
         refused = self.client.post('/requests', headers=self.headers(), json={
             'message':'Please install Visual Studio Code', 'previous_request_id':row['id'],
@@ -1099,14 +1049,14 @@ class WorkflowTests(unittest.TestCase):
                          'NEEDS_CLARIFICATION')
         self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), 1)
         answered = self.client.post('/requests', headers=self.headers(), json={
-            'message':'Power BI', 'previous_request_id':row['id'],
+            'message':'Jira', 'previous_request_id':row['id'],
             'idempotency_key':secrets.token_hex(16)}).json()
         self.assertEqual(answered['id'], row['id'])
         self.assertEqual(answered['intent'], 'ACCESS_REQUEST')
         self.assertEqual(answered['status'], 'AWAITING_ADMIN')
         with self.sessions() as db:
             self.assertEqual(db.scalar(select(AccessRequest).where(
-                AccessRequest.request_id == answered['id'])).application, 'powerbi')
+                AccessRequest.request_id == answered['id'])).application, 'jira')
         self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), 1)
         self.assertEqual(self.client.post('/requests', headers=self.headers(), json={
             'message':'I forgot my password', 'idempotency_key':secrets.token_hex(16)}).status_code, 409)
@@ -1378,7 +1328,7 @@ class AITests(unittest.TestCase):
             ("forgot password",Intent.PASSWORD_RESET,{}),
             ("change password",Intent.PASSWORD_CHANGE,{}),
             ("install VS Code",Intent.SOFTWARE_INSTALL,{"software":"vscode"}),
-            ("access Tableau",Intent.ACCESS_REQUEST,{"application":"tableau"}),
+            ("access Jira",Intent.ACCESS_REQUEST,{"application":"jira"}),
             ("install",Intent.SOFTWARE_INSTALL,{})]:
             result,_=self.classify(message,AgentResponse(intent=intent,message="test",**field))
             self.assertEqual(result.intent,Intent.CLARIFICATION if message=="install" else intent)
@@ -1411,22 +1361,22 @@ class AITests(unittest.TestCase):
             client.return_value.chat.side_effect=ConnectionError()
             self.assertEqual(process_request("change password").intent, Intent.PASSWORD_CHANGE)
             self.assertEqual(process_request("install vscode").intent, Intent.SOFTWARE_INSTALL)
-            self.assertEqual(process_request("access Tableau").intent, Intent.ACCESS_REQUEST)
+            self.assertEqual(process_request("access Jira").intent, Intent.ACCESS_REQUEST)
     def test_followup(self):
-        result=process_request("Tableau",AgentResponse(intent=Intent.CLARIFICATION,message="Which application?"))
-        self.assertEqual(result.application,"tableau")
+        result=process_request("Jira",AgentResponse(intent=Intent.CLARIFICATION,message="Which application?"))
+        self.assertEqual(result.application,"jira")
         self.assertEqual(result.intent,Intent.ACCESS_REQUEST)
 
     def test_ambiguous_actions_and_unknown_targets(self):
         with patch('agent.ollama.Client') as client:
-            self.assertEqual(process_request('install vscode and access Tableau').intent,Intent.CLARIFICATION)
+            self.assertEqual(process_request('install vscode and access Jira').intent,Intent.CLARIFICATION)
             client.assert_not_called()
         self.assertIn('unapproved_software',safe_message('install malware'))
         self.assertIn('unknown_application',safe_message('access unknown'))
 
     def test_missing_model_entity_uses_recognized_target(self):
-        result,_=self.classify('access Tableau',AgentResponse(intent=Intent.ACCESS_REQUEST,message='identified'))
-        self.assertEqual(result.application,'tableau')
+        result,_=self.classify('access Jira',AgentResponse(intent=Intent.ACCESS_REQUEST,message='identified'))
+        self.assertEqual(result.application,'jira')
 
     def test_model_client_pool_is_reused_and_closed(self):
         with patch('agent.ollama.Client') as client:

@@ -207,7 +207,7 @@ class ApplicationIn(Input):
     fallback: Literal['REQUIRE_ADMIN_APPROVAL', 'DENY'] = 'REQUIRE_ADMIN_APPROVAL'
     human_roles: list[str] = Field(default_factory=list)
     risk: Literal['LOW', 'MEDIUM', 'HIGH'] = 'LOW'
-    provider_type: Literal['MOCK', 'NONE', 'GITHUB_ORG', 'TABLEAU', 'JIRA'] = 'MOCK'
+    provider_type: Literal['MOCK', 'NONE', 'GITHUB_ORG', 'JIRA'] = 'MOCK'
     config_ref: str = Field(default='', max_length=100, pattern=r'^[A-Z][A-Z0-9_]*$|^$')
     auto_allowed: bool = False
 
@@ -216,8 +216,6 @@ class ApplicationIn(Input):
         roles = self.requestable_roles
         if self.provider_type == 'GITHUB_ORG' and (self.key != 'github' or roles != ['member'] or self.approval_mode != 'ADMIN_ONLY'):
             raise ValueError('GitHub organization provisioning requires the github catalog entry, member role, and administrator approval')
-        if self.provider_type == 'TABLEAU' and (self.key != 'tableau' or self.approval_mode != 'ADMIN_ONLY' or self.auto_allowed):
-            raise ValueError('Tableau provisioning requires the tableau catalog entry and administrator approval')
         if self.provider_type == 'JIRA' and (self.key != 'jira' or self.approval_mode != 'ADMIN_ONLY' or self.auto_allowed):
             raise ValueError('Jira provisioning requires the jira catalog entry and administrator approval')
         if len(set(roles)) != len(roles) or any(not role or len(role) > 50 or not role.replace('_', '').replace('-', '').isalnum() for role in roles):

@@ -4,11 +4,11 @@ import {readChatHistory, saveChatHistory, clearChatHistory, replyForOpenTicket, 
 
 test('password resolution waits for the Microsoft action and a later request', () => {
   const ticket = {intent: 'PASSWORD_RESET', status: 'AWAITING_USER_ACTION'};
-  assert.equal(replyForOpenTicket(ticket, 'I need Tableau access').showResolution, false);
+  assert.equal(replyForOpenTicket(ticket, 'I need Jira access').showResolution, false);
   ticket.password_action_opened_at = '2026-10-24T10:00:00';
   assert.equal(replyForOpenTicket(ticket, 'What should I do next?').showResolution, false);
   assert.equal(replyForOpenTicket(ticket, 'The password reset is still not working').showResolution, false);
-  assert.equal(replyForOpenTicket(ticket, 'I need Tableau access').showResolution, true);
+  assert.equal(replyForOpenTicket(ticket, 'I need Jira access').showResolution, true);
 });
 
 test('chat history survives reload in the same browser session and is user-scoped', () => {

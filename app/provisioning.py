@@ -31,13 +31,6 @@ class GitHubProvider:
         return ProvisioningResult(result.status, False, result.verified,
                                   'GitHub membership state checked', result.managed)
 
-class TableauProvider:
-    def provision(self, policy, access):
-        from app.tableau_provider import TableauCloudProvider
-        result = TableauCloudProvider().provision(policy, access)
-        return ProvisioningResult(result.status, False, result.verified,
-                                  'Tableau site role checked', result.managed)
-
 class JiraProvider:
     def provision(self, policy, access):
         from app.jira_provider import JiraCloudProvider
@@ -46,8 +39,7 @@ class JiraProvider:
                                   'Jira group and product access checked', result.managed)
 
 PROVIDERS = {'MOCK': MockProvider(), 'NONE': NoProvider(),
-             'GITHUB_ORG': GitHubProvider(), 'TABLEAU': TableauProvider(),
-             'JIRA': JiraProvider()}
+             'GITHUB_ORG': GitHubProvider(), 'JIRA': JiraProvider()}
 
 def provision(policy, access):
     return PROVIDERS.get(policy.provider_type, NoProvider()).provision(policy, access)

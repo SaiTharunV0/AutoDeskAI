@@ -89,7 +89,6 @@ def upgrade_application_access(db_engine=engine):
             for name, definition in columns.items():
                 if name not in existing:
                     connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {definition}'))
-        connection.execute(text("UPDATE application_policies SET display_name = 'Tableau (example)' WHERE key = 'tableau' AND display_name = ''"))
         connection.execute(text("UPDATE application_policies SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
         request_columns = {column['name'] for column in inspect(connection).get_columns('helpdesk_requests')}
         if {'status', 'message'} <= request_columns:

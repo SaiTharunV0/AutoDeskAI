@@ -25,7 +25,7 @@ The complete API map is in README.md and /docs. Authentication, request/history,
 
 ## Verification
 - 21 automated tests passed using isolated SQLite and mocked Ollama responses.
-- Live PostgreSQL + Ollama qwen3:8b: password reset simulation, VS Code task/agent/result, and Tableau backend policy decision all completed.
+- Live PostgreSQL + Ollama qwen3:8b: password reset simulation, VS Code task/agent/result, and application policy decision all completed.
 - Live PostgreSQL request/audit records, Swagger/OpenAPI, unauthenticated denial, employee/admin separation and command rejection verified.
 - React production build passed. Frontend HTML, transformed React module and API proxy each returned HTTP 200.
 - PostgreSQL and Ollama were already running. FastAPI and Vite were started for verification.
@@ -35,4 +35,4 @@ The complete API map is in README.md and /docs. Authentication, request/history,
 ## Run and limitations
 Follow README.md for setup, administrator bootstrap, device enrollment, agent configuration and all three demonstrations. In this workspace the existing Python environment is `..\.venv`.
 
-Password, application provisioning and installation are simulations, visibly labeled in API responses/UI. Real installation is disabled. The catalog is intentionally restricted to VS Code and Tableau. No production identity provider, external access connector, durable queue, persistent agent journal, rate limiter, or distributed scheduler is included. JWTs expire but have no refresh or immediate user-session revocation flow. Lists are bounded rather than fully paginated. Visual QA remains unverified. Live demo accounts, devices, requests and audit records remain in the development database.
+This file records the early prototype verification. See README.md for the current implementation and deployment limits. The predefined software catalog contains VS Code; GitHub and Jira are the active application examples.

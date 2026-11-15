@@ -2,11 +2,10 @@
 SOFTWARE = {
     "vscode": {"display_name": "Visual Studio Code", "aliases": ("vscode", "vs code", "visual studio code")},
 }
-APPLICATIONS = {"tableau": "Tableau"}
+APPLICATIONS = {}
 EXAMPLE_APPLICATIONS = {
     "github": "GitHub",
     "jira": "Jira",
-    "powerbi": "Power BI",
 }
 HIDDEN_APPLICATIONS = frozenset({'tableau', 'powerbi'})
 def software_key(value):

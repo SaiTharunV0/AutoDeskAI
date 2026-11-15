@@ -80,7 +80,7 @@ An employee says, “I forgot my password.” AutoDeskAI creates a password-rese
 
 ### Example: application access
 
-An employee requests Tableau access. The backend checks the Tableau catalog entry, requested role, duration, and configured conditions. The administrator reviews the request and verifies the intended email identity. If approved, the Tableau Cloud provider can add the user to the configured site and read back the assigned site role. The employee sees the updated request and a persistent portal notification. Approval alone remains **access still needs to be provisioned**; only a verified site role is reported as granted. Tableau Cloud credentials and a role mapping are required before live use.
+An employee requests Jira access. The backend checks the Jira catalog entry, requested role, duration, and configured conditions. The administrator verifies the intended email identity. If approved, the Jira Cloud provider can add an existing account to the configured group and verify its product access. The employee sees the updated request and a persistent portal notification. Approval alone remains **access still needs to be provisioned**; only verified group and product access is reported as granted. Jira Cloud credentials and a role mapping are required before live use.
 
 ### Example: software installation
 
@@ -108,7 +108,7 @@ flowchart LR
     API --> C[Bounded Ollama intent classifier]
     F --> M[Microsoft-hosted password pages]
     API --> P[Access policy evaluator]
-    P --> S[GitHub, Tableau Cloud, Jira Cloud, mock, or unconfigured provider]
+    P --> S[GitHub, Jira Cloud, mock, or unconfigured provider]
     D[Registered endpoint agent] --> API
 ```
 
@@ -235,6 +235,6 @@ The repository's [README](README.md#run-locally) contains installation, configur
 
 ## 12. Current limitations and next steps
 
-The main limitations are product boundaries, not hidden features: GitHub organization membership, Tableau Cloud site roles, and Jira Cloud group access have connectors, but each needs backend credentials and administrator identity confirmation. Tableau group/content permissions, invitation acceptance checks, and expiry revocation are not implemented. Jira's connector requires an existing active site user with a visible matching email, verifies the mapped group and product role, and cannot automatically invite a missing user; Atlassian's organization invitation API requires a paid subscription. The Tableau and Jira connectors have only been tested with mocked API responses, not live tenants. A scheduled GitHub expiry worker requires a separately configured Render cron service and has not been verified against a live organization. Software installation covers Windows Visual Studio Code only, and there is no callback confirming Microsoft's password outcome. Notifications appear inside the employee portal rather than through email, SMS, or operating-system push. General knowledge ingestion and open-ended IT question answering are outside the current assistant scope. Chat history is tied to the browser tab session rather than stored across devices. New employee signup requires administrator authorization but does not verify email ownership; access tokens expire without a refresh-token flow.
+The main limitations are product boundaries, not hidden features: GitHub organization membership and Jira Cloud group access need backend credentials and administrator identity confirmation. Jira requires an existing active site user with a visible matching email; it verifies the mapped group and product role but cannot invite a missing user automatically. The Jira connector has only been tested with mocked API responses. A scheduled GitHub expiry worker requires a separately configured Render cron service. Software installation covers Windows Visual Studio Code only, and there is no callback confirming Microsoft password actions. Notifications appear inside the employee portal. Chat history is tied to the browser tab session. Signup requires administrator authorization but does not verify email ownership; access tokens expire without a refresh-token flow.
 
 Before using the system as a production helpdesk, the team would need real provider integrations with verified results, stronger identity and account lifecycle controls, operational monitoring, recovery procedures, and evaluation with actual support cases. Additional software or operating systems need separately reviewed package mappings and endpoint controls before being enabled.

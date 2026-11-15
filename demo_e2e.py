@@ -71,15 +71,13 @@ def main():
         print("DEMO 2: live endpoint installation verified", flush=True)
         client.post(f'/requests/{row["id"]}/resolution', headers=employee_headers,
                     json={'resolved': True}).raise_for_status()
-        row = request("I need access to Tableau.")
+        row = request("I need access to Jira.")
         assert row["intent"] == "ACCESS_REQUEST", row["intent"]
         assert row["status"] == "AWAITING_ADMIN", row["status"]
         access = client.get('/access/requests', headers=employee_headers).json()[0]
         decision = client.post(f'/admin/access/requests/{access["id"]}/decision',
             headers=admin_headers, json={'decision': 'APPROVE', 'reason': 'Demo approval'})
         decision.raise_for_status()
-        client.post(f'/requests/{row["id"]}/resolution', headers=employee_headers,
-                    json={'resolved': True}).raise_for_status()
         print("DEMO 3: backend application policy approved (provisioning unverified)", flush=True)
         assert client.get("/requests").status_code == 401
         assert client.get("/admin/users",headers=employee_headers).status_code == 403

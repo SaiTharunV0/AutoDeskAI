@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import {accessStatusLabel, pendingAccessRequests, buildAccessPayload, buildPolicyPayload, buildDecisionPayload} from './access_logic.js';
 import {requestApi, ApiError} from './api.js';
 
-const application = {key: 'tableau', requestable_roles: ['viewer'], max_duration_days: 90};
+const application = {key: 'reports', requestable_roles: ['viewer'], max_duration_days: 90};
 
 test('employee access form submits only an allowed role and duration', () => {
   assert.deepEqual(buildAccessPayload(application, 'viewer', 'Business reporting', 30, 'request-key'), {
-    application: 'tableau', requested_role: 'viewer', justification: 'Business reporting',
+    application: 'reports', requested_role: 'viewer', justification: 'Business reporting',
     duration_days: 30, idempotency_key: 'request-key',
   });
   assert.throws(() => buildAccessPayload(application, 'admin', '', 30, 'key'), /role/);
@@ -43,7 +43,7 @@ test('access request API uses JWT and displays server errors', async () => {
       {status: 422, headers: {'Content-Type': 'application/json'}});
   };
   await assert.rejects(requestApi('/access/requests', {token: 'jwt', method: 'POST',
-    body: JSON.stringify({application: 'tableau'}), fetchImpl}),
+    body: JSON.stringify({application: 'reports'}), fetchImpl}),
     error => error instanceof ApiError && error.message === 'Role is not requestable');
   assert.equal(path, '/api/access/requests');
   assert.equal(auth, 'Bearer jwt');

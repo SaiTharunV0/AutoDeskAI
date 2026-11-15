@@ -40,8 +40,6 @@ async def lifespan(app):
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
         for key, display_name in {**APPLICATIONS, **EXAMPLE_APPLICATIONS}.items():
-            if key in HIDDEN_APPLICATIONS:
-                continue
             if not db.get(ApplicationPolicy, key):
                 db.add(ApplicationPolicy(key=key, display_name=display_name + ' (example)',
                     description='Example catalog entry. Admin approval required; no live provisioning integration is configured.'))
@@ -641,7 +639,7 @@ def catalog(user=Depends(get_current_user), db: Session = Depends(get_db)):
     return {"software": [{"key": p.key, "display_name": SOFTWARE[p.key]["display_name"], "enabled": p.enabled}
                         for p in db.scalars(select(SoftwarePolicy)) if p.key in SOFTWARE],
             "applications": [{key: value for key, value in catalog_view(p).items() if key != 'config_ref'}
-                        for p in db.scalars(select(ApplicationPolicy))]}
+                        for p in db.scalars(select(ApplicationPolicy)) if p.key not in HIDDEN_APPLICATIONS]}
 
 @app.put("/admin/software/{key}", tags=["Admin"])
 def software_policy(key: str, payload: PolicyIn, user=Depends(require_admin), db: Session = Depends(get_db)):
@@ -655,6 +653,8 @@ def software_policy(key: str, payload: PolicyIn, user=Depends(require_admin), db
 
 @app.put("/admin/applications/{key}", tags=["Admin"])
 def application_policy(key: str, payload: PolicyIn, user=Depends(require_admin), db: Session = Depends(get_db)):
+    if key in HIDDEN_APPLICATIONS:
+        raise HTTPException(404, 'Unknown application')
     row = db.get(ApplicationPolicy, key)
     if not row:
         raise HTTPException(404, "Unknown application")
@@ -704,6 +704,8 @@ def add_application(payload: ApplicationIn, user=Depends(require_admin), db: Ses
 
 @app.put('/admin/access/applications/{key}', tags=['Admin application access'])
 def edit_application(key: str, payload: ApplicationIn, user=Depends(require_admin), db: Session = Depends(get_db)):
+    if key in HIDDEN_APPLICATIONS:
+        raise HTTPException(404, 'Application not found')
     if payload.key != key:
         raise HTTPException(422, 'Application ID cannot be changed')
     row = db.scalar(select(ApplicationPolicy).where(ApplicationPolicy.key == key).with_for_update())
@@ -713,6 +715,8 @@ def edit_application(key: str, payload: ApplicationIn, user=Depends(require_admi
 
 @app.get('/admin/access/applications/{key}/revisions', tags=['Admin application access'])
 def policy_revisions(key: str, user=Depends(require_admin), db: Session = Depends(get_db)):
+    if key in HIDDEN_APPLICATIONS:
+        raise HTTPException(404, 'Application not found')
     return [{'version': row.version, 'actor_id': row.actor_id, 'snapshot': json.loads(row.snapshot_json),
              'created_at': row.created_at} for row in db.scalars(select(AccessPolicyRevision).where(
                 AccessPolicyRevision.application_key == key).order_by(AccessPolicyRevision.version.desc()))]
