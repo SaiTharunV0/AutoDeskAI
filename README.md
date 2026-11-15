@@ -4,6 +4,8 @@ AutoDeskAI is an IT helpdesk prototype with a FastAPI backend, PostgreSQL databa
 
 For a full explanation of the project's purpose, users, workflows, architecture, security measures, and expected impact, see [Project Documentation](PROJECT_DOCUMENTATION.md).
 
+The [report figure set](report/figures/README.md) contains 11 labeled diagrams and illustrative interface images for the project report.
+
 ## Current behavior
 
 - Employees and administrators register with first name, last name, date of birth, username, email, and password. New employee registrations remain pending until an administrator authorizes or rejects them in the Admin Panel. The panel keeps separate Pending, Approved, Rejected, and Deauthorized filters; an approved account can be deauthorized or later authorized again. These statuses persist in the user record and every change is audited. A deauthorized account cannot sign in or use an existing token on the next API request. Invited administrator registrations are approved by the private `ADMIN_REGISTRATION_CODE` configured on the backend. Sign in with username or email through the matching employee or admin portal.
