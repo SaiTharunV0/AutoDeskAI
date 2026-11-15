@@ -58,3 +58,15 @@ test('later provider verification still identifies an administrator approval', (
     resolution_reporter: 'ADMIN', resolved: null, message: 'GitHub organization membership was verified.'}];
   assert.match(appendAdminDecisions(chat, requests)[1].t, /administrator approved/);
 });
+
+test('existing rejection reply is marked and duplicate saved replies are removed', () => {
+  const message = 'Your administrator couldn’t approve this request. This ticket is closed.';
+  const requests = [{id: 13, intent: 'ACCESS_REQUEST', status: 'CLOSED', rejection_source: 'ADMIN', message}];
+  const chat = [{r: 'bot', t: 'Sent to an administrator', id: 13, status: 'AWAITING_ADMIN'},
+    {r: 'bot', t: message, id: 13, status: 'CLOSED'},
+    {r: 'bot', t: message, id: 13, status: 'CLOSED', decision: 'ADMIN'}];
+  const updated = appendAdminDecisions(chat, requests);
+  assert.equal(updated.length, 2);
+  assert.equal(updated[1].decision, 'ADMIN');
+  assert.strictEqual(appendAdminDecisions(updated, requests), updated);
+});

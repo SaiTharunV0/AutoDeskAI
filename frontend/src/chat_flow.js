@@ -27,10 +27,9 @@ export function clearChatHistory(storage, userId) {
 
 export function appendAdminDecisions(chat, requests) {
   const chatRequests = new Set(chat.filter(row => row.r === 'bot' && Number.isInteger(row.id)).map(row => row.id));
-  const announced = new Set(chat.filter(row => row.decision === 'ADMIN').map(row => row.id));
-  const updates = [];
+  const decisions = new Map();
   for (const request of [...requests].reverse()) {
-    if (!chatRequests.has(request.id) || announced.has(request.id) || request.status !== 'CLOSED') continue;
+    if (!chatRequests.has(request.id) || request.status !== 'CLOSED') continue;
     let message;
     if (request.rejection_source === 'ADMIN') {
       message = request.message || 'An administrator rejected your request. This ticket is closed.';
@@ -41,12 +40,33 @@ export function appendAdminDecisions(chat, requests) {
     } else if (request.resolution_reporter === 'ADMIN' && request.resolved === true) {
       message = request.message || 'An administrator marked your request resolved and closed the ticket.';
     }
-    if (message) {
-      updates.push({r: 'bot', t: message, id: request.id, status: request.status, decision: 'ADMIN'});
+    if (message) decisions.set(request.id, message);
+  }
+  const announced = new Set();
+  let changed = false;
+  const normalized = [];
+  for (const row of chat) {
+    const message = decisions.get(row.id);
+    if (row.r === 'bot' && message && (row.decision === 'ADMIN' || row.t === message)) {
+      if (announced.has(row.id)) { changed = true; continue; }
+      announced.add(row.id);
+      if (row.decision !== 'ADMIN') {
+        normalized.push({...row, decision: 'ADMIN'});
+        changed = true;
+        continue;
+      }
+    }
+    normalized.push(row);
+  }
+  for (const request of [...requests].reverse()) {
+    const message = decisions.get(request.id);
+    if (message && !announced.has(request.id)) {
+      normalized.push({r: 'bot', t: message, id: request.id, status: request.status, decision: 'ADMIN'});
       announced.add(request.id);
+      changed = true;
     }
   }
-  return updates.length ? [...chat, ...updates] : chat;
+  return changed ? normalized : chat;
 }
 
 const asksForNextStep = text => /\b(what|how|where|next|continue|link|microsoft|instructions|steps)\b/i.test(text)
