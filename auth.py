@@ -51,7 +51,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         if not user:
             raise ValueError()
         if user.role != "admin" and user.approval_status != "APPROVED":
-            raise HTTPException(403, "Your account is awaiting administrator approval.")
+            message = {
+                'PENDING': 'Your account is awaiting administrator approval.',
+                'REJECTED': 'Your account registration was rejected by an administrator.',
+                'DEAUTHORIZED': 'Your account access was deauthorized by an administrator.',
+            }.get(user.approval_status, 'Your account is not authorized.')
+            raise HTTPException(403, message)
         return user
     except ValueError:
         raise HTTPException(401, "Invalid or expired token", headers={"WWW-Authenticate": "Bearer"}) from None

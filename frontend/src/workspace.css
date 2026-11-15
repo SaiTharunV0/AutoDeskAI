@@ -302,6 +302,16 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .policy small { font-size: 11px; }
 .app .policy button, .app .deviceToggle { background: var(--soft); color: var(--teal-dark); border-color: var(--line); font-size: 12px; }
 .policy select { font-size: 12px; }
+.authorizationFilters { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 8px; }
+.app .authorizationFilters button { background: var(--soft); color: var(--muted); border: 1px solid var(--line); padding: 8px 12px; font-size: 12px; }
+.app .authorizationFilters button.active { background: var(--teal-dark); color: #fff; }
+.authorizationFilters button span { margin-left: 5px; font-variant-numeric: tabular-nums; }
+.authorizationRow > .authorizationStatus { flex: none; min-width: 90px; text-align: center; text-transform: capitalize; font-size: 12px; }
+.authorizationStatus.approved { color: #327a54; }
+.authorizationStatus.pending { color: #996823; }
+.authorizationStatus.rejected, .authorizationStatus.deauthorized { color: #aa4e45; }
+.authorizationActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.app .authorizationActions button.danger { color: #aa4e45; }
 .endpointAdminRow { border-color: var(--line); font-size: 12px; }
 .endpointIdentity b { font-size: 13px; font-weight: 600; }
 .endpointIdentity small { font-size: 11px; }

@@ -120,6 +120,48 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(approved.json()['approval_status'], 'APPROVED')
         self.assertEqual(self.client.post('/auth/login', json={
             'identifier': 'pending', 'password': self.password}).status_code, 200)
+
+    def test_admin_can_reject_reauthorize_and_deauthorize_employee(self):
+        registered = self.client.post('/auth/register', json=registration_payload(
+            'reviewed', 'reviewed@example.test', self.password)).json()
+        target_id = registered['user']['id']
+        url = f'/admin/users/{target_id}/approval'
+        self.assertEqual(self.client.patch(url, headers=self.headers(),
+            json={'approved': False}).status_code, 403)
+        rejected = self.client.patch(url, headers=self.headers(self.admin),
+            json={'approved': False})
+        self.assertEqual(rejected.json()['approval_status'], 'REJECTED')
+        self.assertEqual(self.client.get('/auth/me', headers={
+            'Authorization': 'Bearer ' + registered['access_token']}).status_code, 403)
+        blocked = self.client.post('/auth/login', json={
+            'identifier': 'reviewed', 'password': self.password})
+        self.assertEqual(blocked.status_code, 403)
+        self.assertIn('rejected', blocked.json()['detail'])
+        users = self.client.get('/admin/users', headers=self.headers(self.admin)).json()
+        self.assertEqual(next(row for row in users if row['id'] == target_id)['approval_status'], 'REJECTED')
+        approved = self.client.patch(url, headers=self.headers(self.admin),
+            json={'approved': True})
+        self.assertEqual(approved.json()['approval_status'], 'APPROVED')
+        token = self.client.post('/auth/login', json={
+            'identifier': 'reviewed', 'password': self.password}).json()['access_token']
+        deauthorized = self.client.patch(url, headers=self.headers(self.admin),
+            json={'approved': False})
+        self.assertEqual(deauthorized.json()['approval_status'], 'DEAUTHORIZED')
+        session = self.client.get('/auth/me', headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(session.status_code, 403)
+        self.assertIn('deauthorized', session.json()['detail'])
+        self.assertEqual(self.client.post('/auth/login', json={
+            'identifier': 'reviewed', 'password': self.password}).status_code, 403)
+        self.assertEqual(self.client.patch(url, headers=self.headers(self.admin),
+            json={'approved': False}).json()['approval_status'], 'DEAUTHORIZED')
+        self.assertEqual(self.client.patch(f"/admin/users/{self.admin['user']['id']}/approval",
+            headers=self.headers(self.admin), json={'approved': False}).status_code, 404)
+        with self.sessions() as db:
+            actions = [row.action for row in db.scalars(select(AuditLog).where(
+                AuditLog.resource_type == 'user', AuditLog.resource_id == target_id)).all()]
+        self.assertEqual(actions.count('USER_REJECTED'), 1)
+        self.assertEqual(actions.count('USER_APPROVED'), 1)
+        self.assertEqual(actions.count('USER_DEAUTHORIZED'), 1)
     def test_password_and_request_ownership(self):
         row = self.request(Intent.PASSWORD_RESET, "I forgot my password").json()
         self.assertEqual(row["status"], "AWAITING_USER_ACTION")

@@ -143,9 +143,14 @@ def login(payload: Login, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(403, 'This account cannot sign in through the selected portal.')
     if user.role != 'admin' and user.approval_status != 'APPROVED':
-        audit(db, user.id, 'LOGIN_BLOCKED_PENDING_APPROVAL', 'user', user.id, 'PENDING')
+        audit(db, user.id, 'LOGIN_BLOCKED_ACCOUNT_STATUS', 'user', user.id, user.approval_status)
         db.commit()
-        raise HTTPException(403, 'Your account is awaiting administrator approval.')
+        message = {
+            'PENDING': 'Your account is awaiting administrator approval.',
+            'REJECTED': 'Your account registration was rejected by an administrator.',
+            'DEAUTHORIZED': 'Your account access was deauthorized by an administrator.',
+        }.get(user.approval_status, 'Your account is not authorized.')
+        raise HTTPException(403, message)
     audit(db, user.id, "LOGIN_SUCCESS", "user", user.id, "COMPLETED")
     db.commit()
     return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
@@ -179,13 +184,18 @@ def users(user=Depends(require_admin), db: Session = Depends(get_db)):
 @app.patch('/admin/users/{user_id}/approval', response_model=UserOut, tags=['Admin'])
 def approve_user(user_id: int, payload: UserApprovalUpdate,
                  user=Depends(require_admin), db: Session = Depends(get_db)):
-    target = db.get(User, user_id)
+    target = db.scalar(select(User).where(User.id == user_id).with_for_update())
     if not target or target.role == 'admin':
         raise HTTPException(404, 'Employee account not found')
-    if not payload.approved:
-        raise HTTPException(422, 'Only approval is supported for new employee accounts.')
-    target.approval_status = 'APPROVED'
-    audit(db, user.id, 'USER_APPROVED', 'user', target.id, 'COMPLETED')
+    previous = target.approval_status
+    target.approval_status = ('APPROVED' if payload.approved else
+                              'REJECTED' if previous == 'PENDING' else
+                              'DEAUTHORIZED' if previous == 'APPROVED' else previous)
+    if target.approval_status != previous:
+        action = {'APPROVED': 'USER_APPROVED', 'REJECTED': 'USER_REJECTED',
+                  'DEAUTHORIZED': 'USER_DEAUTHORIZED'}[target.approval_status]
+        audit(db, user.id, action, 'user', target.id, target.approval_status,
+              f'Previous status: {previous}')
     db.commit()
     return target
 
