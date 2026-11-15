@@ -93,6 +93,11 @@ class RequestIn(Input):
     previous_request_id: int | None = None
     idempotency_key: str = Field(min_length=8, max_length=100)
 
+class SoftwareInstallIn(Input):
+    software: str = Field(min_length=2, max_length=80)
+    device_id: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
 class TaskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

@@ -823,6 +823,37 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/requests/{row['id']}/retry-action",
             headers=self.headers()).status_code, 409)
 
+    def test_software_catalog_request_queues_only_approved_owned_device(self):
+        device = self.enroll()
+        catalog = self.client.get('/software/catalog', headers=self.headers())
+        self.assertEqual(catalog.json(), [{'key': 'vscode', 'display_name': 'Visual Studio Code'}])
+        payload = {'software': 'vscode', 'device_id': device['device']['id'],
+                   'idempotency_key': secrets.token_hex(16)}
+        self.assertEqual(self.client.post('/software/requests', json=payload).status_code, 401)
+        self.assertEqual(self.client.post('/software/requests', headers=self.headers(self.other),
+            json=payload).status_code, 409)
+        with patch('app.workflows.process_request', side_effect=AssertionError('Model must not run')):
+            response = self.client.post('/software/requests', headers=self.headers(), json=payload)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['task']['device_id'], payload['device_id'])
+        self.assertEqual(self.client.post('/software/requests', headers=self.headers(),
+            json=payload).json()['id'], response.json()['id'])
+        self.assertEqual(self.client.post('/software/requests', headers=self.headers(), json={
+            **payload, 'idempotency_key': secrets.token_hex(16)}).status_code, 409)
+        self.assertEqual(self.client.get('/agent/tasks', headers=device['headers']).json()[0]['software'], 'vscode')
+
+    def test_software_catalog_rejects_disabled_or_unknown_package(self):
+        device = self.enroll()
+        payload = {'software': 'unknown', 'device_id': device['device']['id'],
+                   'idempotency_key': secrets.token_hex(16)}
+        self.assertEqual(self.client.post('/software/requests', headers=self.headers(),
+            json=payload).status_code, 400)
+        self.client.put('/admin/software/vscode', headers=self.headers(self.admin),
+            json={'enabled': False, 'required_role': 'employee'})
+        self.assertEqual(self.client.get('/software/catalog', headers=self.headers()).json(), [])
+        self.assertEqual(self.client.post('/software/requests', headers=self.headers(),
+            json={**payload, 'software': 'vscode'}).status_code, 400)
+
     def test_software_task_survives_startup(self):
         device = self.enroll()
         row = self.request(Intent.SOFTWARE_INSTALL, 'install vscode', software='vscode',

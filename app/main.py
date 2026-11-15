@@ -264,6 +264,58 @@ def own_requests(user=Depends(get_current_user), db: Session = Depends(get_db)):
     return db.scalars(select(HelpdeskRequest).options(selectinload(HelpdeskRequest.task)).where(HelpdeskRequest.user_id == user.id)
                       .order_by(HelpdeskRequest.id.desc()).limit(200)).all()
 
+@app.get('/software/catalog', tags=['Software installation'])
+def software_catalog(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    return [{'key': policy.key, 'display_name': SOFTWARE[policy.key]['display_name']}
+            for policy in db.scalars(select(SoftwarePolicy).where(SoftwarePolicy.enabled == True))
+            if policy.key in SOFTWARE]
+
+@app.post('/software/requests', response_model=RequestOut, status_code=201,
+          tags=['Software installation'])
+def request_software_install(payload: SoftwareInstallIn, user=Depends(get_current_user),
+                             db: Session = Depends(get_db)):
+    """Queue only an approved package for a connected device owned by the requester."""
+    expire_tasks(db)
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
+    existing = db.scalar(select(HelpdeskRequest).where(
+        HelpdeskRequest.user_id == user.id,
+        HelpdeskRequest.idempotency_key == payload.idempotency_key))
+    if existing:
+        if (existing.intent != 'SOFTWARE_INSTALL' or not existing.task
+                or existing.task.software != payload.software
+                or existing.task.device_id != payload.device_id):
+            raise HTTPException(409, 'Idempotency key already used for a different request')
+        return existing
+    policy = db.get(SoftwarePolicy, payload.software)
+    if payload.software not in SOFTWARE or not policy or not policy.enabled:
+        raise HTTPException(400, 'This software is not approved for installation')
+    open_ticket = db.scalar(select(HelpdeskRequest.id).where(
+        HelpdeskRequest.user_id == user.id, HelpdeskRequest.status != 'CLOSED').limit(1))
+    if open_ticket:
+        raise HTTPException(409, 'Finish your current request before starting another')
+    device = db.get(Device, payload.device_id)
+    if (not device or device.owner_user_id != user.id or device.status != 'ACTIVE'
+            or device.os_info != 'Windows' or not device.last_seen
+            or device.last_seen < now() - timedelta(seconds=config.DEVICE_OFFLINE_SECONDS)):
+        raise HTTPException(409, 'Select a connected Windows device assigned to you')
+    request = HelpdeskRequest(user_id=user.id, intent='SOFTWARE_INSTALL',
+        original_message=f'Install {SOFTWARE[payload.software]["display_name"]}'[:200],
+        idempotency_key=payload.idempotency_key, status='PENDING',
+        message=f'{SOFTWARE[payload.software]["display_name"]} installation is queued for your Windows device.')
+    db.add(request)
+    try:
+        db.flush()
+        db.add(SoftwareTask(request_id=request.id, device_id=device.id,
+                            software=payload.software, status='PENDING'))
+        audit(db, user.id, 'SOFTWARE_INSTALL_QUEUED', 'request', request.id,
+              'PENDING', f'{payload.software} on device {device.id}; software catalog')
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, 'Request already submitted; refresh your requests') from None
+    db.refresh(request)
+    return request
+
 @app.get("/admin/requests", response_model=list[RequestOut], tags=["Admin"])
 def all_requests(user=Depends(require_admin), db: Session = Depends(get_db)):
     expire_tasks(db)

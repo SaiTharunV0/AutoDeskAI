@@ -109,7 +109,7 @@ Register through the appropriate portal. The administrator invite code must matc
 .\.venv\Scripts\python.exe -m endpoint_agent.agent --once
 ```
 
-The endpoint agent installs approved Visual Studio Code through WinGet with an exact package ID, user scope, and noninteractive flags. Enroll a Windows device, run the agent, and select its connected device in chat before requesting installation. The agent checks WinGet's installed-package list before reporting success.
+The employee **Software Installation** page loads approved entries from `GET /software/catalog`. Select a connected Windows device assigned to the signed-in employee and submit `POST /software/requests` with the predefined software key, device ID, and an idempotency key. The request queues a task without calling the AI classifier. The same one-open-ticket rule applies to chat and the software page. The agent installs approved Visual Studio Code through WinGet with an exact package ID, user scope, and noninteractive flags, then checks WinGet's installed-package list before reporting success. The page shows installation request status; employee or administrator ticket closure follows the configured workflow. The catalog currently contains Visual Studio Code only. The admin can enable or disable that predefined capability in **Manage workspace**.
 
 ## Workflows
 
