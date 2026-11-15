@@ -6,7 +6,7 @@ For a full explanation of the project's purpose, users, workflows, architecture,
 
 For the code-level architecture, data model, API, integrations, configuration, deployment, and testing, see [Technical Documentation](TECHNICAL_DOCUMENTATION.md).
 
-The [report figure set](report/figures/README.md) contains 11 labeled diagrams and illustrative interface images for the project report.
+For report-ready design material, see [Architecture and Workflows](docs/ARCHITECTURE_AND_WORKFLOWS.md) and [Testing and Implementation Evidence](docs/TESTING_AND_EVIDENCE.md). The [report figure set](report/figures/README.md) provides the corresponding SVG figures.
 
 ## Current behavior
 
