@@ -24,7 +24,7 @@ services:
       - key: GITHUB_TOKEN
         sync: false
       - key: JIRA_SITE_URL
-        sync: false
+        value: https://autodeskai.atlassian.net
       - key: JIRA_ADMIN_EMAIL
         sync: false
       - key: JIRA_API_TOKEN
