@@ -8,6 +8,7 @@ EXAMPLE_APPLICATIONS = {
     "jira": "Jira",
     "powerbi": "Power BI",
 }
+HIDDEN_APPLICATIONS = frozenset({'tableau', 'powerbi'})
 def software_key(value):
     normalized = (value or "").strip().lower()
     return next((key for key, item in SOFTWARE.items() if normalized in item["aliases"]), None)

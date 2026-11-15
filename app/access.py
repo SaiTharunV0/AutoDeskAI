@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from app.models import AccessRequest, ApplicationPolicy, HelpdeskRequest, AccessPolicyRevision, GitHubIdentity, User, UserNotification, now
+from app.catalog import HIDDEN_APPLICATIONS
 from app.workflows import audit
 from app.provisioning import provision
 
@@ -77,6 +78,20 @@ def catalog_view(row):
         'risk': row.risk, 'provider_type': row.provider_type, 'config_ref': row.config_ref,
         'auto_allowed': row.auto_allowed, 'version': row.version,
     }
+
+def retire_application_catalog_entries(db):
+    """Hide retired applications without discarding policies or request history."""
+    for key in HIDDEN_APPLICATIONS:
+        policy = db.get(ApplicationPolicy, key)
+        if not policy or not policy.enabled:
+            continue
+        policy.enabled = False
+        policy.version = (policy.version or 0) + 1
+        db.flush()
+        db.add(AccessPolicyRevision(application_key=key, version=policy.version,
+            actor_id=None, snapshot_json=json.dumps(catalog_view(policy), sort_keys=True)))
+        audit(db, None, 'ACCESS_CATALOG_ENTRY_RETIRED', 'application', None,
+              'COMPLETED', key)
 
 def save_policy(db, row, payload, actor_id):
     if payload.provider_type == 'GITHUB_ORG' and (payload.key != 'github' or payload.requestable_roles != ['member'] or payload.approval_mode != 'ADMIN_ONLY'):

@@ -358,6 +358,30 @@ class WorkflowTests(unittest.TestCase):
         revisions = self.client.get('/admin/access/applications/github/revisions', headers=self.headers(self.admin)).json()
         self.assertEqual([item['version'] for item in revisions], [2, 1])
 
+    def test_tableau_and_powerbi_are_removed_from_employee_catalog(self):
+        from app.access import retire_application_catalog_entries
+        with self.sessions() as db:
+            db.add(ApplicationPolicy(key='powerbi', display_name='Power BI'))
+            db.commit()
+            retire_application_catalog_entries(db)
+            db.commit()
+            versions = {key: db.get(ApplicationPolicy, key).version
+                        for key in ('tableau', 'powerbi')}
+            self.assertTrue(all(not db.get(ApplicationPolicy, key).enabled
+                                for key in versions))
+            retire_application_catalog_entries(db)
+            db.commit()
+            self.assertEqual(versions, {key: db.get(ApplicationPolicy, key).version
+                                        for key in versions})
+        employee_catalog = self.client.get('/access/applications', headers=self.headers()).json()
+        self.assertFalse({'tableau', 'powerbi'} & {item['key'] for item in employee_catalog})
+        admin_catalog = self.client.get('/admin/access/applications',
+                                        headers=self.headers(self.admin)).json()
+        self.assertFalse({'tableau', 'powerbi'} & {item['key'] for item in admin_catalog})
+        self.assertEqual(self.client.post('/admin/access/applications',
+            headers=self.headers(self.admin), json=self.access_policy_payload(
+                key='powerbi')).status_code, 409)
+
     def test_access_policy_automatic_and_unverified_fallback(self):
         payload = self.access_policy_payload(approval_mode='CONDITIONAL', auto_allowed=True,
             conditions={'min_justification_length': 5})

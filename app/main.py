@@ -15,9 +15,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profile, upgrade_query_indexes, upgrade_application_access
 from app.models import *
 from app.schemas import *
-from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS
+from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS, HIDDEN_APPLICATIONS
 from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections
-from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, verify_github_access, correct_legacy_access_requests, close_prior_admin_approvals
+from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, verify_github_access, correct_legacy_access_requests, close_prior_admin_approvals, retire_application_catalog_entries
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
 from agent import UnsafeRequest, close_model_client
@@ -39,9 +39,12 @@ async def lifespan(app):
             if not db.get(SoftwarePolicy, key):
                 db.add(SoftwarePolicy(key=key))
         for key, display_name in {**APPLICATIONS, **EXAMPLE_APPLICATIONS}.items():
+            if key in HIDDEN_APPLICATIONS:
+                continue
             if not db.get(ApplicationPolicy, key):
                 db.add(ApplicationPolicy(key=key, display_name=display_name + ' (example)',
                     description='Example catalog entry. Admin approval required; no live provisioning integration is configured.'))
+        retire_application_catalog_entries(db)
         if not db.get(AppSetting, 'ticket_closure_mode'):
             db.add(AppSetting(key='ticket_closure_mode', value='AUTOMATIC'))
         db.flush()
@@ -612,7 +615,7 @@ def requestable_applications(user=Depends(get_current_user), db: Session = Depen
     return [{key: value for key, value in catalog_view(row).items() if key != 'config_ref'}
             for row in db.scalars(select(ApplicationPolicy).where(
         ApplicationPolicy.enabled == True).order_by(ApplicationPolicy.display_name))
-        if row.required_role == 'employee' or user.role == 'admin']
+        if row.key not in HIDDEN_APPLICATIONS and (row.required_role == 'employee' or user.role == 'admin')]
 
 @app.post('/access/requests', response_model=AccessOut, status_code=201, tags=['Application access'])
 def create_access_request(payload: AccessSubmit, user=Depends(get_current_user),
@@ -635,10 +638,13 @@ def my_access_request(access_id: int, user=Depends(get_current_user), db: Sessio
 
 @app.get('/admin/access/applications', tags=['Admin application access'])
 def all_applications(user=Depends(require_admin), db: Session = Depends(get_db)):
-    return [catalog_view(row) for row in db.scalars(select(ApplicationPolicy).order_by(ApplicationPolicy.key))]
+    return [catalog_view(row) for row in db.scalars(select(ApplicationPolicy).where(
+        ApplicationPolicy.key.not_in(HIDDEN_APPLICATIONS)).order_by(ApplicationPolicy.key))]
 
 @app.post('/admin/access/applications', status_code=201, tags=['Admin application access'])
 def add_application(payload: ApplicationIn, user=Depends(require_admin), db: Session = Depends(get_db)):
+    if payload.key in HIDDEN_APPLICATIONS:
+        raise HTTPException(409, 'This application has been removed from the catalog')
     if db.get(ApplicationPolicy, payload.key):
         raise HTTPException(409, 'Application ID already exists')
     return save_policy(db, ApplicationPolicy(key=payload.key), payload, user.id)
