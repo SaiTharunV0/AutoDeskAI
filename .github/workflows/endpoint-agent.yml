@@ -1,0 +1,39 @@
+name: Windows endpoint agent bundle
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'endpoint_agent/**'
+      - 'agent_bundle/**'
+      - '.github/workflows/endpoint-agent.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install agent build dependencies
+        run: python -m pip install "pyinstaller>=6,<7" "httpx>=0.27,<1" "python-dotenv>=1,<2"
+      - name: Build standalone agent
+        run: python -m PyInstaller --noconfirm --clean --onefile --name AutoDeskAI-Agent --paths . endpoint_agent/agent.py
+      - name: Check executable help
+        run: .\dist\AutoDeskAI-Agent.exe --help
+      - name: Assemble installer bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bundle -Force | Out-Null
+          Copy-Item dist/AutoDeskAI-Agent.exe,agent_bundle/install-agent.ps1,agent_bundle/uninstall-agent.ps1,agent_bundle/launch-agent.ps1,agent_bundle/README.md bundle/
+          Compress-Archive -Path bundle/* -DestinationPath AutoDeskAI-Agent-Windows.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoDeskAI-Agent-Windows
+          path: AutoDeskAI-Agent-Windows.zip
+          if-no-files-found: error
+          retention-days: 30

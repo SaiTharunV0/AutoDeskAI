@@ -34,9 +34,22 @@ def run_once(api, device_id, pending=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--check", action="store_true", help="Verify enrollment without claiming installation tasks")
     args = parser.parse_args()
     config.validate()
     api = AgentAPI(config.SERVER_URL, config.AGENT_TOKEN)
+    if args.check:
+        try:
+            device = api.heartbeat()
+            if device["device_id"] != config.DEVICE_ID:
+                raise ValueError("Configured device does not match authenticated device")
+            print("Agent enrollment verified.")
+        except (httpx.HTTPError, ValueError):
+            print("Agent connection failed; check the backend URL, device ID, and token.")
+            raise SystemExit(1) from None
+        finally:
+            api.close()
+        return
     pending = {}
     failures = 0
     try:

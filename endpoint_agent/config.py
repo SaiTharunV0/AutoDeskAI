@@ -1,7 +1,14 @@
 import os
+import sys
+from pathlib import Path
 from urllib.parse import urlparse
 from dotenv import load_dotenv
-load_dotenv()
+# A frozen executable extracts its modules into a temporary directory. Read
+# configuration beside the installed executable instead of that directory.
+if getattr(sys, 'frozen', False):
+    load_dotenv(dotenv_path=Path(sys.executable).resolve().parent / '.env')
+else:
+    load_dotenv()
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:8000").rstrip("/")
 DEVICE_ID = os.getenv("DEVICE_ID", "")
 AGENT_TOKEN = os.getenv("AGENT_TOKEN", "")

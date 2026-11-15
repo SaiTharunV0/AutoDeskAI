@@ -861,6 +861,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/requests/{row['id']}", headers=self.headers()).json()['status'], 'PENDING')
         self.assertEqual(self.client.get('/agent/tasks', headers=device['headers']).json()[0]['software'], 'vscode')
 
+    def test_agent_connection_check_does_not_claim_tasks(self):
+        from endpoint_agent.agent import main as agent_main
+        from endpoint_agent import config as agent_config
+        with patch('endpoint_agent.agent.config.validate'), patch('endpoint_agent.agent.AgentAPI') as api_class, \
+                patch('sys.argv', ['AutoDeskAI-Agent', '--check']):
+            api_class.return_value.heartbeat.return_value = {'device_id': agent_config.DEVICE_ID}
+            agent_main()
+            api_class.return_value.heartbeat.assert_called_once()
+            api_class.return_value.tasks.assert_not_called()
+            api_class.return_value.close.assert_called_once()
+
     def test_software_clarification_normalizes_requested_product(self):
         prior = AgentResponse(intent=Intent.CLARIFICATION, message='Which software would you like to install?')
         result = process_request('install vscode', prior)
