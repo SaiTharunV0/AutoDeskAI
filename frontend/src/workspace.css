@@ -137,6 +137,7 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .cardHead .title b { font-size: 14px; font-weight: 600; }
 .cardHead .title small { font-size: 11px; margin-top: 2px; color: var(--muted); }
 .cardHead .bot { width: 35px; height: 35px; border-radius: 10px; padding: 5px; background: var(--soft); border: 1px solid var(--line); }
+.cardHead .bot img { width: 100%; height: 100%; }
 .online { font-size: 10px; color: var(--teal); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .online i { width: 5px; height: 5px; background: #71a268; box-shadow: 0 0 0 3px var(--accent-soft); }
 .app .deviceBar { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin: 0; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--paper); }
@@ -146,8 +147,10 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .deviceBar small { font-size: 10px; color: var(--muted); }
 .app .assistant.full .chat, [data-theme="dark"] .app .chat { height: clamp(310px, 43dvh, 480px); min-height: 300px; margin: 0; padding: 24px 22px; border: 0; border-radius: 0; background: var(--paper); gap: 22px; }
 .assistant .row { align-items: flex-end; gap: 9px; }
+.assistant .row:not(.user) { align-items: flex-start; }
 .app .assistant .mini { width: 25px; height: 25px; flex: 0 0 25px; border-radius: 7px; }
-.app .mini.bot { background: var(--soft); border: 1px solid var(--line); padding: 3px; }
+.app .mini.bot { background: var(--soft); border: 1px solid var(--line); padding: 2px; overflow: hidden; }
+.app .mini.bot img { width: 100%; height: 100%; }
 .app .mini.person, [data-theme="dark"] .app .mini.person { background: var(--accent-soft); color: var(--teal); }
 .app .assistant .bubble, [data-theme="dark"] .app .bubble { font-size: 13px; line-height: 1.7; max-width: min(83%, 65ch); border: 1px solid var(--line); border-radius: 12px 12px 12px 3px; padding: 13px 15px; background: var(--soft); color: var(--ink); }
 .app .row.user .bubble, [data-theme="dark"] .app .row.user .bubble { border-color: #176b57; background: #176b57; color: #fff; border-radius: 12px 12px 3px 12px; }
