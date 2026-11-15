@@ -4,6 +4,8 @@ AutoDeskAI is an IT helpdesk prototype with a FastAPI backend, PostgreSQL databa
 
 For a full explanation of the project's purpose, users, workflows, architecture, security measures, and expected impact, see [Project Documentation](PROJECT_DOCUMENTATION.md).
 
+For the code-level architecture, data model, API, integrations, configuration, deployment, and testing, see [Technical Documentation](TECHNICAL_DOCUMENTATION.md).
+
 The [report figure set](report/figures/README.md) contains 11 labeled diagrams and illustrative interface images for the project report.
 
 ## Current behavior
