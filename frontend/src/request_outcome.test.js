@@ -29,3 +29,10 @@ test('rejected requests name the deciding party in the resolution', () => {
   assert.equal(requestResolution({status: 'CLOSED', rejection_source: 'ADMIN'}),
     'Rejected by administrator');
 });
+
+test('an administrator approval closes the ticket without employee confirmation', () => {
+  const request = {status: 'CLOSED', intent: 'ACCESS_REQUEST', resolved: null,
+    resolution_reporter: 'ADMIN'};
+  assert.deepEqual(requestOutcome(request), {label: 'Approved', code: 'completed'});
+  assert.equal(requestResolution(request), 'Approved by administrator; ticket closed');
+});

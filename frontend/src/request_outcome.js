@@ -7,6 +7,9 @@ export function requestOutcome(request) {
     if (request.rejection_source || request.message?.includes(rejectedClosure)) {
       return {label: 'Rejected', code: 'rejected'};
     }
+    if (request.intent === 'ACCESS_REQUEST' && request.resolution_reporter === 'ADMIN') {
+      return {label: 'Approved', code: 'completed'};
+    }
     if (request.resolved === true || request.task?.status === 'COMPLETED') {
       return {label: 'Completed', code: 'completed'};
     }
@@ -44,5 +47,7 @@ export function requestResolution(request) {
     return `Confirmed by ${request.resolution_reporter === 'ADMIN' ? 'administrator' : 'employee'}`;
   }
   if (request.resolved === false) return 'Reported unresolved';
+  if (request.status === 'CLOSED' && request.intent === 'ACCESS_REQUEST'
+      && request.resolution_reporter === 'ADMIN') return 'Approved by administrator; ticket closed';
   return request.status === 'CLOSED' ? 'Closed without a resolution report' : 'Awaiting outcome';
 }

@@ -17,7 +17,7 @@ from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS
 from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections
-from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, verify_github_access, correct_legacy_access_requests
+from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, verify_github_access, correct_legacy_access_requests, close_prior_admin_approvals
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
 from agent import UnsafeRequest, close_model_client
@@ -33,6 +33,7 @@ async def lifespan(app):
     with SessionLocal() as db:
         correct_legacy_password_requests(db)
         correct_legacy_access_requests(db)
+        close_prior_admin_approvals(db)
         close_legacy_rejections(db)
         for key in SOFTWARE:
             if not db.get(SoftwarePolicy, key):
@@ -520,11 +521,11 @@ def close_ticket(request_id: int, user=Depends(require_admin), db: Session = Dep
         request.message = 'An administrator followed up, marked the issue resolved, and closed the ticket.'
         audit(db, user.id, 'TICKET_ESCALATION_CLOSED_BY_ADMIN', 'request', request.id, 'CLOSED')
     elif request.status == 'AWAITING_ADMIN_CLOSE' and request.intent == 'SOFTWARE_INSTALL':
-        request.status = 'COMPLETED'
+        request.status = 'CLOSED'
         request.resolved = True
         request.resolution_reporter = 'ADMIN'
         request.message = 'Ticket closed by an administrator after confirming the reported installation result.'
-        audit(db, user.id, 'TICKET_CLOSED_BY_ADMIN', 'request', request.id, 'COMPLETED')
+        audit(db, user.id, 'TICKET_CLOSED_BY_ADMIN', 'request', request.id, 'CLOSED')
     else:
         raise HTTPException(409, 'This ticket is not awaiting administrator closure')
     db.commit()

@@ -22,6 +22,18 @@ def notify_access_decision(db, access, display_name, source, reason=''):
     db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
         kind='ACCESS_APPROVED' if approved else 'ACCESS_REJECTED', title=title, message=message[:500]))
 
+def close_admin_approved_request(db, access):
+    """Close the helpdesk ticket; the access record still tracks provisioning."""
+    request = access.request
+    request.status = 'CLOSED'
+    request.resolved = None
+    request.resolution_reporter = 'ADMIN'
+    request.message = ('An administrator approved this request. Access was verified. This ticket is closed.'
+                       if access.provisioning_status == 'GRANTED' else
+                       'An administrator approved this request. Access is still being set up; follow its status in Application Access. This ticket is closed.')
+    audit(db, access.approver_id, 'ACCESS_ADMIN_TICKET_CLOSED', 'request', request.id,
+          'CLOSED', f'Provisioning: {access.provisioning_status}')
+
 def attempt_provision(db, policy, access):
     access.provision_attempts = (access.provision_attempts or 0) + 1
     access.last_provision_attempt_at = now()
@@ -39,14 +51,15 @@ def attempt_provision(db, policy, access):
     if status == 'GRANTED':
         access.provisioned_at = now()
         access.expires_at = now() + timedelta(days=access.duration_days)
-        access.status = access.request.status = 'COMPLETED'
+        access.status = 'COMPLETED'
+        access.request.status = 'CLOSED' if access.approver_id else 'COMPLETED'
         access.request.message = ('GitHub organization membership was verified.' if policy.provider_type == 'GITHUB_ORG'
                                   else 'Tableau site access was verified.' if policy.provider_type == 'TABLEAU'
                                   else 'Jira group and product access were verified.' if policy.provider_type == 'JIRA'
-                                  else 'Application access was verified.') + ' Report whether you can use the access.'
+                                  else 'Application access was verified.') + (' This ticket is closed.' if access.approver_id else ' Report whether you can use the access.')
         db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
             kind='ACCESS_GRANTED', title='Application access verified',
-            message='Your application access is active. Please check that you can use it.'))
+            message='Your application access is active.'))
     elif status == 'PENDING_ACCEPTANCE':
         access.request.message = 'GitHub sent an organization invitation. Accept it, then ask an administrator to verify access.'
     audit(db, None, 'ACCESS_PROVISIONING_ATTEMPT', 'request', access.request_id,
@@ -242,8 +255,11 @@ def decide_access(db, access_id, admin, decision, reason):
         access.provisioning_status = 'NOT_CONFIGURED' if decision == 'APPROVE' else 'NOT_STARTED'
     audit(db, admin.id, 'ACCESS_ADMIN_APPROVED' if decision == 'APPROVE' else 'ACCESS_ADMIN_REJECTED',
           'request', access.request_id, status, reason.strip())
-    from app.workflows import close_rejected_request
-    close_rejected_request(db, access.request, source='ADMIN')
+    if decision == 'APPROVE':
+        close_admin_approved_request(db, access)
+    else:
+        from app.workflows import close_rejected_request
+        close_rejected_request(db, access.request, source='ADMIN')
     notify_access_decision(db, access, policy.display_name if policy and policy.display_name else access.application,
         'by an administrator', reason.strip())
     db.commit()
@@ -277,11 +293,14 @@ def verify_github_access(db, access_id, admin):
         access.provisioning_status = 'GRANTED'
         access.provisioned_at = now()
         access.expires_at = now() + timedelta(days=access.duration_days)
-        access.status = access.request.status = 'COMPLETED'
-        access.request.message = 'GitHub organization membership was verified. Report whether you can use the access.'
+        access.status = 'COMPLETED'
+        access.request.status = 'CLOSED' if access.approver_id else 'COMPLETED'
+        access.request.message = ('GitHub organization membership was verified. This ticket is closed.'
+                                  if access.approver_id else
+                                  'GitHub organization membership was verified. Report whether you can use the access.')
         db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
             kind='ACCESS_GRANTED', title='GitHub access verified',
-            message='Your GitHub organization membership is active. Please check that you can use it.'))
+            message='Your GitHub organization membership is active.'))
         audit(db, admin.id, 'ACCESS_GRANT_VERIFIED', 'request', access.request_id, 'COMPLETED', 'GitHub membership active')
     elif result.status == 'PENDING_ACCEPTANCE':
         access.provisioning_status = 'PENDING_ACCEPTANCE'
@@ -305,5 +324,18 @@ def correct_legacy_access_requests(db):
         access.request.message = 'Legacy demo approval did not provision external access.'
         audit(db, None, 'ACCESS_LEGACY_STATUS_CORRECTED', 'request', access.request_id,
               access.status, 'Prior demo completion was not an external grant')
+    if rows:
+        db.commit()
+
+def close_prior_admin_approvals(db):
+    """Apply the direct-closure rule to earlier admin approvals awaiting confirmation."""
+    rows = db.scalars(select(AccessRequest).join(
+        HelpdeskRequest, AccessRequest.request_id == HelpdeskRequest.id).where(
+        AccessRequest.approver_id.is_not(None),
+        AccessRequest.status.in_(('APPROVED_PROVISIONING_REQUIRED', 'COMPLETED')),
+        HelpdeskRequest.status.in_(('APPROVED_PROVISIONING_REQUIRED', 'COMPLETED')),
+        HelpdeskRequest.resolution_reporter.is_(None))).all()
+    for access in rows:
+        close_admin_approved_request(db, access)
     if rows:
         db.commit()

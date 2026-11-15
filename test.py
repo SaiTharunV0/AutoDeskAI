@@ -287,6 +287,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(read['read_at'])
         self.assertEqual(self.request(Intent.PASSWORD_RESET, 'forgot password').status_code, 201)
 
+    def test_prior_admin_approval_is_closed_once(self):
+        from app.access import decide_access, close_prior_admin_approvals
+        row = self.client.post('/access/requests', headers=self.headers(), json={
+            'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
+            'idempotency_key': secrets.token_hex(16)}).json()
+        with self.sessions() as db:
+            decide_access(db, row['id'], db.get(User, self.admin['user']['id']), 'APPROVE', '')
+            request = db.get(HelpdeskRequest, row['request_id'])
+            request.status = 'APPROVED_PROVISIONING_REQUIRED'
+            request.resolution_reporter = None
+            db.commit()
+            close_prior_admin_approvals(db)
+            self.assertEqual(request.status, 'CLOSED')
+            self.assertEqual(request.resolution_reporter, 'ADMIN')
+            close_prior_admin_approvals(db)
+            audits = db.scalars(select(AuditLog).where(
+                AuditLog.resource_id == row['request_id'],
+                AuditLog.action == 'ACCESS_ADMIN_TICKET_CLOSED')).all()
+            self.assertEqual(len(audits), 2)
+
     def test_confirmation_blocks_new_chat_and_access_requests(self):
         row = self.request(Intent.PASSWORD_RESET, 'forgot password').json()
         self.assertEqual(self.request(Intent.ACCESS_REQUEST, 'access Tableau', application='tableau').status_code, 409)
@@ -383,6 +403,12 @@ class WorkflowTests(unittest.TestCase):
             'decision': 'APPROVE', 'reason': 'Business need verified'}).json()
         self.assertEqual(approved['status'], 'APPROVED_PROVISIONING_REQUIRED')
         self.assertEqual(approved['approver_id'], self.admin['user']['id'])
+        ticket = self.client.get(f'/requests/{first["request_id"]}', headers=self.headers()).json()
+        self.assertEqual(ticket['status'], 'CLOSED')
+        self.assertIsNone(ticket['resolved'])
+        self.assertEqual(ticket['resolution_reporter'], 'ADMIN')
+        self.assertEqual(self.client.post(f'/requests/{first["request_id"]}/resolution',
+            headers=self.headers(), json={'resolved': True}).status_code, 409)
         self.assertEqual(self.client.post(decision_url, headers=self.headers(self.admin), json={
             'decision': 'REJECT', 'reason': 'Second decision'}).status_code, 409)
         notices = self.client.get('/notifications', headers=self.headers()).json()
@@ -392,6 +418,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.get('/notifications', headers=self.headers(self.other)).json(), [])
         history = self.client.get(f'/requests/{first["request_id"]}/history', headers=self.headers()).json()
         self.assertIn('ACCESS_ADMIN_APPROVED', [item['action'] for item in history])
+        self.assertIn('ACCESS_ADMIN_TICKET_CLOSED', [item['action'] for item in history])
+        self.assertEqual(self.request(Intent.PASSWORD_RESET, 'forgot password').status_code, 201)
 
     def test_access_admin_only_and_deny_fallback(self):
         payload = self.access_policy_payload(approval_mode='ADMIN_ONLY', auto_allowed=True,
@@ -466,6 +494,8 @@ class WorkflowTests(unittest.TestCase):
                 headers=self.headers(self.admin), json={'decision':'APPROVE'}).json()
         self.assertEqual(approved['provisioning_status'], 'PENDING_ACCEPTANCE')
         self.assertEqual(approved['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
+            headers=self.headers()).json()['status'], 'CLOSED')
         self.assertEqual(approved['github_login'], 'employee-gh')
         with patch('app.github_provider.GitHubOrganizationProvider.verify', return_value=GitHubResult('GRANTED', False)):
             unverified = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/verify",
@@ -477,6 +507,8 @@ class WorkflowTests(unittest.TestCase):
                 headers=self.headers(self.admin)).json()
         self.assertEqual(verified['status'], 'COMPLETED')
         self.assertEqual(verified['provisioning_status'], 'GRANTED')
+        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
+            headers=self.headers()).json()['status'], 'CLOSED')
         self.assertIsNotNone(verified['expires_at'])
         notices = self.client.get('/notifications', headers=self.headers()).json()
         self.assertEqual(sum(row['kind'] == 'ACCESS_GRANTED' for row in notices), 1)
@@ -497,12 +529,16 @@ class WorkflowTests(unittest.TestCase):
                 headers=self.headers(self.admin), json={'decision': 'APPROVE'}).json()
         self.assertEqual(approved['provisioning_status'], 'ROLE_MISMATCH')
         self.assertEqual(approved['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
+            headers=self.headers()).json()['status'], 'CLOSED')
         with patch('app.tableau_provider.TableauCloudProvider.provision',
                    return_value=TableauResult('GRANTED', True, True)):
             retried = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/retry",
                 headers=self.headers(self.admin)).json()
         self.assertEqual(retried['status'], 'COMPLETED')
         self.assertEqual(retried['provisioning_status'], 'GRANTED')
+        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
+            headers=self.headers()).json()['status'], 'CLOSED')
         self.assertTrue(retried['provider_managed'])
 
     def test_tableau_provider_checks_assigned_role_and_identity(self):
@@ -555,11 +591,15 @@ class WorkflowTests(unittest.TestCase):
             approved = self.client.post(f"/admin/access/requests/{submitted['id']}/decision",
                 headers=self.headers(self.admin), json={'decision': 'APPROVE'}).json()
         self.assertEqual(approved['provisioning_status'], 'USER_NOT_FOUND')
+        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
+            headers=self.headers()).json()['status'], 'CLOSED')
         with patch('app.jira_provider.JiraCloudProvider.provision',
                    return_value=JiraResult('GRANTED', True, True)):
             retried = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/retry",
                 headers=self.headers(self.admin)).json()
         self.assertEqual(retried['status'], 'COMPLETED')
+        self.assertEqual(self.client.get(f'/requests/{submitted["request_id"]}',
+            headers=self.headers()).json()['status'], 'CLOSED')
         self.assertTrue(retried['provider_managed'])
 
     def test_jira_provider_verifies_exact_identity_group_and_product(self):
@@ -793,6 +833,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('not authorised', rejected['message'])
         self.assertEqual(self.client.post(url, headers=self.headers(self.admin),
             json={'reason': 'A different reason'}).status_code, 409)
+
+    def test_admin_software_closure_needs_no_employee_confirmation(self):
+        with self.sessions() as db:
+            row = HelpdeskRequest(user_id=self.employee['user']['id'], intent='SOFTWARE_INSTALL',
+                status='AWAITING_ADMIN_CLOSE', message='Installation verified by endpoint',
+                idempotency_key=secrets.token_hex(16))
+            db.add(row)
+            db.commit()
+            request_id = row.id
+        closed = self.client.post(f'/admin/requests/{request_id}/close',
+            headers=self.headers(self.admin)).json()
+        self.assertEqual(closed['status'], 'CLOSED')
+        self.assertTrue(closed['resolved'])
+        self.assertEqual(closed['resolution_reporter'], 'ADMIN')
+        self.assertEqual(self.client.post(f'/requests/{request_id}/resolution',
+            headers=self.headers(), json={'resolved': True}).status_code, 409)
     def test_unapproved_software_and_invalid_device(self):
         self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install malware",software="malware").json()["status"],"CLOSED")
         self.assertEqual(self.request(Intent.SOFTWARE_INSTALL,"install vscode",software="vscode",device_id=999).json()["status"],"CLOSED")

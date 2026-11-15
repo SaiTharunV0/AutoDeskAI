@@ -27,7 +27,7 @@ def close_rejected_request(db, request, source='AUTODESKAI'):
     request.rejection_source = source
     request.message = request.message[:440] + ' I have closed this ticket; no confirmation is needed.'
     audit(db, request.user_id, 'REJECTED_TICKET_CLOSED', 'request', request.id,
-          'CLOSED', 'Rejected automatically; no employee resolution reported')
+          'CLOSED', f'Rejected by {source.lower()}; no employee resolution reported')
 
 
 def close_legacy_rejections(db):
