@@ -8,6 +8,7 @@ from endpoint_agent.installer import install
 
 def run_once(api, device_id, pending=None):
     pending = pending if pending is not None else {}
+    completed_install = False
     device = api.heartbeat()
     if device["device_id"] != device_id:
         raise ValueError("Configured device does not match authenticated device")
@@ -15,6 +16,7 @@ def run_once(api, device_id, pending=None):
     for task_id, result in list(pending.items()):
         try:
             api.report(task_id, result)
+            completed_install |= result.get("success") is True and result.get("verified") is True
         except httpx.HTTPStatusError as error:
             if error.response.status_code not in (404, 409):
                 raise
@@ -29,7 +31,9 @@ def run_once(api, device_id, pending=None):
             result = {"success": False, "verified": False, "error_code": "INSTALL_FAILED"}
         pending[task["id"]] = result
         api.report(task["id"], result)
+        completed_install |= result.get("success") is True and result.get("verified") is True
         del pending[task["id"]]
+    return completed_install
 
 def main():
     parser = argparse.ArgumentParser()
@@ -55,8 +59,11 @@ def main():
     try:
         while True:
             try:
-                run_once(api, config.DEVICE_ID, pending)
+                completed_install = run_once(api, config.DEVICE_ID, pending)
                 failures = 0
+                if completed_install and not args.once:
+                    print("Installation verified and reported. Stopping endpoint agent.")
+                    raise SystemExit(10)
                 print("Heartbeat and task cycle completed.")
             except (httpx.HTTPError, ValueError):
                 failures = min(failures + 1, 6)

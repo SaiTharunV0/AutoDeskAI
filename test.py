@@ -1312,6 +1312,33 @@ class EndpointEfficiencyTests(unittest.TestCase):
                 self.assertEqual(pending, {})
                 api.tasks.assert_called_once()
 
+    def test_agent_stops_only_after_verified_result_is_accepted(self):
+        from unittest.mock import Mock
+        api = Mock()
+        api.heartbeat.return_value = {'id': 1, 'device_id': 'endpoint-test'}
+        api.tasks.return_value = [{'id': 5, 'device_id': 1, 'status': 'PROCESSING', 'software': 'vscode'}]
+        with patch('endpoint_agent.agent.install', return_value={
+            'success': True, 'verified': True, 'error_code': None}):
+            self.assertTrue(run_once(api, 'endpoint-test'))
+        api.report.assert_called_once_with(5, {
+            'success': True, 'verified': True, 'error_code': None})
+        api.report.side_effect = TimeoutError()
+        with patch('endpoint_agent.agent.install', return_value={
+            'success': True, 'verified': True, 'error_code': None}):
+            with self.assertRaises(TimeoutError):
+                run_once(api, 'endpoint-test')
+
+    def test_agent_main_exits_after_completed_install(self):
+        from endpoint_agent.agent import main as agent_main
+        with patch('endpoint_agent.agent.config.validate'), \
+                patch('endpoint_agent.agent.AgentAPI') as api_class, \
+                patch('endpoint_agent.agent.run_once', return_value=True), \
+                patch('sys.argv', ['AutoDeskAI-Agent']):
+            with self.assertRaises(SystemExit) as stopped:
+                agent_main()
+            self.assertEqual(stopped.exception.code, 10)
+            api_class.return_value.close.assert_called_once()
+
 class AITests(unittest.TestCase):
     def setUp(self):
         close_model_client()
