@@ -14,6 +14,7 @@ def upgrade_user_profile(db_engine=engine):
         'last_name': 'VARCHAR(50)',
         'date_of_birth': 'DATE',
         'username': 'VARCHAR(50)',
+        'approval_status': "VARCHAR(20) NOT NULL DEFAULT 'APPROVED'",
     }
     with db_engine.begin() as connection:
         for name, column_type in columns.items():

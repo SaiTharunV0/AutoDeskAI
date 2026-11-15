@@ -53,6 +53,9 @@ class WorkflowTests(unittest.TestCase):
     def account(self, name):
         payload = registration_payload(name, name + "@example.test", self.password)
         self.assertEqual(self.client.post("/auth/register", json=payload).status_code, 201)
+        with self.sessions() as db:
+            db.scalar(select(User).where(User.email == payload["email"])).approval_status = "APPROVED"
+            db.commit()
         return self.client.post(
             "/auth/login", json={"email": payload["email"], "password": self.password}).json()
     def headers(self, account=None):
@@ -102,6 +105,21 @@ class WorkflowTests(unittest.TestCase):
         token = create_access_token(self.employee["user"]["id"], -1)
         self.assertEqual(self.client.get("/auth/me", headers={"Authorization":"Bearer "+token}).status_code, 401)
         self.assertEqual(self.client.post("/auth/register", json={**registration_payload('new', 'new@example.test', self.password), "role":"admin"}).status_code, 422)
+    def test_new_employee_requires_admin_authorization(self):
+        payload = registration_payload('pending', 'pending@example.test', self.password)
+        registered = self.client.post('/auth/register', json=payload)
+        self.assertEqual(registered.status_code, 201)
+        self.assertEqual(registered.json()['user']['approval_status'], 'PENDING')
+        self.assertEqual(self.client.post('/auth/login', json={
+            'identifier': 'pending', 'password': self.password}).status_code, 403)
+        pending = self.client.get('/admin/users', headers=self.headers(self.admin)).json()
+        target = next(row for row in pending if row['username'] == 'pending')
+        approved = self.client.patch(f"/admin/users/{target['id']}/approval",
+                                     headers=self.headers(self.admin), json={'approved': True})
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()['approval_status'], 'APPROVED')
+        self.assertEqual(self.client.post('/auth/login', json={
+            'identifier': 'pending', 'password': self.password}).status_code, 200)
     def test_password_and_request_ownership(self):
         row = self.request(Intent.PASSWORD_RESET, "I forgot my password").json()
         self.assertEqual(row["status"], "AWAITING_USER_ACTION")

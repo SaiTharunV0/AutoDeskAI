@@ -50,6 +50,8 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         user = db.get(User, decode_access_token(credentials.credentials))
         if not user:
             raise ValueError()
+        if user.role != "admin" and user.approval_status != "APPROVED":
+            raise HTTPException(403, "Your account is awaiting administrator approval.")
         return user
     except ValueError:
         raise HTTPException(401, "Invalid or expired token", headers={"WWW-Authenticate": "Bearer"}) from None

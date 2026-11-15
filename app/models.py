@@ -17,6 +17,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(150), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(50), default="employee")
+    approval_status: Mapped[str] = mapped_column(String(20), default="APPROVED", nullable=False)
     devices: Mapped[list["Device"]] = relationship(back_populates="owner")
     requests: Mapped[list["HelpdeskRequest"]] = relationship(back_populates="user")
 

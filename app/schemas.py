@@ -69,6 +69,10 @@ class UserOut(BaseModel):
     username: str | None
     first_name: str | None
     last_name: str | None
+    approval_status: str
+
+class UserApprovalUpdate(Input):
+    approved: bool
 
 class UserUpdate(Input):
     name: str = Field(min_length=1, max_length=100)

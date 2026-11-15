@@ -89,7 +89,7 @@ def database_test(db: Session = Depends(get_db), user=Depends(require_admin)):
     db.execute(text("SELECT 1"))
     return {"status": "success"}
 
-def create_registered_user(payload: Register, db: Session):
+def create_registered_user(payload: Register, db: Session, approval_status: str | None = None):
     duplicates = db.execute(select(User.email, User.username).where(or_(
         User.email == payload.email, User.username == payload.username))).all()
     if any(row.email == payload.email for row in duplicates):
@@ -99,12 +99,13 @@ def create_registered_user(payload: Register, db: Session):
     user = User(name=f'{payload.first_name} {payload.last_name}', first_name=payload.first_name,
                 last_name=payload.last_name, date_of_birth=payload.date_of_birth,
                 username=payload.username, email=payload.email,
-                password_hash=hash_password(payload.password.get_secret_value()), role=payload.account_role)
+                password_hash=hash_password(payload.password.get_secret_value()), role=payload.account_role,
+                approval_status=approval_status or ('APPROVED' if payload.account_role == 'admin' else 'PENDING'))
     db.add(user)
     try:
         db.flush()
         audit(db, user.id, "ADMIN_REGISTERED" if payload.account_role == "admin" else "USER_REGISTERED",
-              "user", user.id, "COMPLETED")
+              "user", user.id, user.approval_status)
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, 'Email or username already registered') from None
@@ -119,6 +120,9 @@ def register(payload: Register, db: Session = Depends(get_db)):
         if not hmac.compare_digest(invite.encode("utf-8"), config.ADMIN_REGISTRATION_CODE.encode("utf-8")):
             raise HTTPException(403, "Administrator invite code is invalid.")
     user = create_registered_user(payload, db)
+    if user.approval_status != 'APPROVED':
+        db.commit()
+        return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
     audit(db, user.id, "LOGIN_SUCCESS", "user", user.id, "COMPLETED")
     db.commit()
     return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
@@ -138,6 +142,10 @@ def login(payload: Login, db: Session = Depends(get_db)):
               "Account used the wrong sign-in portal")
         db.commit()
         raise HTTPException(403, 'This account cannot sign in through the selected portal.')
+    if user.role != 'admin' and user.approval_status != 'APPROVED':
+        audit(db, user.id, 'LOGIN_BLOCKED_PENDING_APPROVAL', 'user', user.id, 'PENDING')
+        db.commit()
+        raise HTTPException(403, 'Your account is awaiting administrator approval.')
     audit(db, user.id, "LOGIN_SUCCESS", "user", user.id, "COMPLETED")
     db.commit()
     return TokenOut(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
@@ -168,10 +176,23 @@ def read_notification(notification_id: int, user=Depends(get_current_user), db: 
 def users(user=Depends(require_admin), db: Session = Depends(get_db)):
     return db.scalars(select(User).order_by(User.id).limit(500)).all()
 
+@app.patch('/admin/users/{user_id}/approval', response_model=UserOut, tags=['Admin'])
+def approve_user(user_id: int, payload: UserApprovalUpdate,
+                 user=Depends(require_admin), db: Session = Depends(get_db)):
+    target = db.get(User, user_id)
+    if not target or target.role == 'admin':
+        raise HTTPException(404, 'Employee account not found')
+    if not payload.approved:
+        raise HTTPException(422, 'Only approval is supported for new employee accounts.')
+    target.approval_status = 'APPROVED'
+    audit(db, user.id, 'USER_APPROVED', 'user', target.id, 'COMPLETED')
+    db.commit()
+    return target
+
 @app.post('/users', response_model=UserOut, status_code=201, tags=['Admin'],
           description='Legacy user creation route, now administrator-only and requires a password.')
 def admin_create_user(payload: Register, user=Depends(require_admin), db: Session = Depends(get_db)):
-    created = create_registered_user(payload, db)
+    created = create_registered_user(payload, db, approval_status='APPROVED')
     db.commit()
     return created
 
