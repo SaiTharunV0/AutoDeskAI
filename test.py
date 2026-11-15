@@ -545,6 +545,11 @@ class WorkflowTests(unittest.TestCase):
             'application': 'jira', 'requested_role': 'user', 'duration_days': 30,
             'idempotency_key': secrets.token_hex(16)}).json()
         self.assertEqual(submitted['status'], 'AWAITING_ADMIN')
+        for path in ('/admin/access/requests', '/admin/access/pending'):
+            listed = self.client.get(path, headers=self.headers(self.admin))
+            self.assertEqual(listed.status_code, 200)
+            self.assertEqual(listed.json()[0]['requester_name'], self.employee['user']['name'])
+            self.assertEqual(listed.json()[0]['username'], self.employee['user']['username'])
         with patch('app.jira_provider.JiraCloudProvider.provision',
                    return_value=JiraResult('USER_NOT_FOUND')):
             approved = self.client.post(f"/admin/access/requests/{submitted['id']}/decision",

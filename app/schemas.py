@@ -297,6 +297,10 @@ class AccessOut(BaseModel):
     provider_managed: bool = False
     provider_resource: str | None = None
 
+class AdminAccessOut(AccessOut):
+    requester_name: str
+    username: str | None
+
 class GitHubIdentityIn(Input):
     github_login: str = Field(min_length=1, max_length=39, pattern=r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$')
     confirmed: Literal[True]

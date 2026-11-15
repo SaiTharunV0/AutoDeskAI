@@ -657,14 +657,24 @@ def policy_revisions(key: str, user=Depends(require_admin), db: Session = Depend
              'created_at': row.created_at} for row in db.scalars(select(AccessPolicyRevision).where(
                 AccessPolicyRevision.application_key == key).order_by(AccessPolicyRevision.version.desc()))]
 
-@app.get('/admin/access/requests', response_model=list[AccessOut], tags=['Admin application access'])
-def all_access_requests(user=Depends(require_admin), db: Session = Depends(get_db)):
-    return db.scalars(select(AccessRequest).order_by(AccessRequest.id.desc()).limit(500)).all()
+def admin_access_rows(db: Session, *, pending: bool = False):
+    query = select(AccessRequest, User.name, User.username).join(
+        User, AccessRequest.user_id == User.id)
+    if pending:
+        query = query.where(AccessRequest.status == 'AWAITING_ADMIN').order_by(AccessRequest.id)
+    else:
+        query = query.order_by(AccessRequest.id.desc())
+    return [AdminAccessOut(**AccessOut.model_validate(access).model_dump(),
+                           requester_name=name, username=username)
+            for access, name, username in db.execute(query.limit(500)).all()]
 
-@app.get('/admin/access/pending', response_model=list[AccessOut], tags=['Admin application access'])
+@app.get('/admin/access/requests', response_model=list[AdminAccessOut], tags=['Admin application access'])
+def all_access_requests(user=Depends(require_admin), db: Session = Depends(get_db)):
+    return admin_access_rows(db)
+
+@app.get('/admin/access/pending', response_model=list[AdminAccessOut], tags=['Admin application access'])
 def pending_access_requests(user=Depends(require_admin), db: Session = Depends(get_db)):
-    return db.scalars(select(AccessRequest).where(AccessRequest.status == 'AWAITING_ADMIN')
-        .order_by(AccessRequest.id).limit(500)).all()
+    return admin_access_rows(db, pending=True)
 
 @app.post('/admin/access/requests/{access_id}/decision', response_model=AccessOut, tags=['Admin application access'])
 def admin_access_decision(access_id: int, payload: AccessDecisionIn, user=Depends(require_admin),
