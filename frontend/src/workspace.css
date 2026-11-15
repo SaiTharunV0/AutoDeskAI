@@ -153,12 +153,11 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
 .app .row.user .bubble, [data-theme="dark"] .app .row.user .bubble { border-color: #176b57; background: #176b57; color: #fff; border-radius: 12px 12px 3px 12px; }
 .app .bubble small { margin-top: 6px; font-size: 10px; color: var(--muted); }
 .app .row.user .bubble small { color: #c5e5d3; }
-.app .resolutionBubble { border-color: #b5cfa5; background: var(--accent-soft); }
-.resolutionBubble > b { display: block; margin-top: 6px; }
 .app .bubble button, [data-theme="dark"] .app .bubble button { display: inline-flex; margin-top: 8px; background: var(--paper); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; color: var(--teal-dark); font-size: 11px; font-weight: 600; }
-.app .bubble .ticketCloseChoices { gap: 7px; margin-top: 12px; }
-.app .bubble .ticketCloseChoices button:first-child { background: #176b57; border-color: #176b57; color: #fff; }
-.app .bubble .ticketCloseChoices button { margin-top: 0; }
+.chatRequestActions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 20px 0; }
+.chatRequestActions button { border: 1px solid var(--line); border-radius: 7px; background: var(--soft); color: var(--teal-dark); padding: 7px 11px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.chatRequestActions button:first-child { background: #176b57; border-color: #176b57; color: #fff; }
+.chatRequestActions button:disabled { opacity: .6; cursor: wait; }
 .app .composer { display: flex; gap: 8px; margin: 10px 20px 0; padding: 7px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); box-shadow: 0 2px 7px #143c3510; align-items: flex-end; }
 .app .composer:focus-within { border-color: #83ab90; box-shadow: 0 0 0 3px var(--accent-soft); }
 .app .composer textarea { width: 100%; min-height: 53px; height: 53px; border: 0; background: transparent; border-radius: 0; padding: 10px 7px; resize: vertical; font-size: 13px; line-height: 1.5; }
@@ -459,6 +458,7 @@ label { color: var(--ink); font-size: 13px; font-weight: 600; }
   .app .assistant .mini { width: 22px; height: 22px; flex-basis: 22px; }
   .app .assistant .bubble { max-width: calc(100% - 31px); padding: 11px 12px; font-size: 12px; }
   .app .composer { margin: 9px 12px 0; gap: 4px; padding: 6px; }
+  .chatRequestActions { margin: 9px 12px 0; }
   .app .composer textarea { font-size: 12px; min-height: 54px; padding-inline: 5px; }
   .app .composer .send { width: 34px; min-width: 34px; height: 34px; min-height: 34px; }
   .composerMeta { padding: 9px 15px 15px; }
