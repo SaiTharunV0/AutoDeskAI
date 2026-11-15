@@ -113,6 +113,8 @@ For **local development from this repository**, set `SERVER_URL`, `DEVICE_ID`, `
 
 The employee **Software Installation** page loads approved entries from `GET /software/catalog`. Select a connected Windows device assigned to the signed-in employee and submit `POST /software/requests` with the predefined software key, device ID, and an idempotency key. The request queues a task without calling the AI classifier. The same one-open-ticket rule applies to chat and the software page. The agent installs approved Visual Studio Code through WinGet with an exact package ID, user scope, and noninteractive flags, then checks WinGet's installed-package list before reporting success. Once the backend accepts a verified installation result, the agent exits and its Windows sign-in scheduled task is removed. The endpoint goes offline after the heartbeat window; start the installed agent again before requesting more software. The page shows installation request status; employee or administrator ticket closure follows the configured workflow. The catalog currently contains Visual Studio Code only. The admin can enable or disable that predefined capability in **Manage workspace**.
 
+**Tested installation:** The project owner completed an end-to-end Visual Studio Code installation on an enrolled Windows employee device and confirmed that the software installed successfully. This verifies the current supported software flow: device enrollment, task delivery, WinGet installation, and installed-package verification. The later agent auto-stop change requires the updated Windows bundle on the employee device; it is not part of that completed installation test.
+
 ## Workflows
 
 ### Application access
