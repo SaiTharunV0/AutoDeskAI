@@ -15,7 +15,7 @@ from app.models import User, SoftwarePolicy, ApplicationPolicy, AccessRequest, A
 from app.models import GitHubIdentity
 from app.access import correct_legacy_access_requests
 from app.provisioning import ProvisioningResult
-from app.workflows import correct_legacy_password_requests, expire_tasks
+from app.workflows import correct_legacy_password_requests, correct_legacy_access_clarifications, expire_tasks
 from schema import AgentResponse, Intent
 from auth import create_access_token
 from agent import process_request, safe_message, UnsafeRequest, get_model_client, close_model_client
@@ -1117,6 +1117,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post('/admin/access/applications', headers=self.headers(self.admin),
             json=payload).status_code, 201)
         row = self.request(Intent.CLARIFICATION, 'i need access').json()
+        self.assertEqual(row['message'], 'Which application do you need access to: GitHub or Jira?')
+        self.assertNotIn('username', row['message'].lower())
         response = self.client.post('/requests', headers=self.headers(), json={
             'message': 'github', 'previous_request_id': row['id'],
             'idempotency_key': secrets.token_hex(16)})
@@ -1134,6 +1136,31 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(AccessRequest).where(
                 AccessRequest.request_id == row['id'])).github_login, 'saitharunv0')
         self.assertEqual(len(self.client.get('/requests', headers=self.headers()).json()), 1)
+
+    def test_jira_clarification_uses_same_request_after_application_choice(self):
+        with self.sessions() as db:
+            db.add(ApplicationPolicy(key='jira', display_name='Jira'))
+            db.commit()
+        row = self.request(Intent.CLARIFICATION, 'access').json()
+        self.assertEqual(row['message'], 'Which application do you need access to: GitHub or Jira?')
+        response = self.client.post('/requests', headers=self.headers(), json={
+            'message': 'Jira', 'previous_request_id': row['id'],
+            'idempotency_key': secrets.token_hex(16)})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['id'], row['id'])
+        self.assertEqual(response.json()['status'], 'AWAITING_ADMIN')
+        with self.sessions() as db:
+            access = db.scalar(select(AccessRequest).where(AccessRequest.request_id == row['id']))
+            self.assertEqual(access.application, 'jira')
+
+    def test_existing_access_clarification_uses_current_application_question(self):
+        row = self.request(Intent.CLARIFICATION, 'access').json()
+        with self.sessions() as db:
+            ticket = db.get(HelpdeskRequest, row['id'])
+            ticket.message = 'Which application do you need access to? For GitHub, use Application Access to enter your GitHub username.'
+            db.commit()
+            correct_legacy_access_clarifications(db)
+            self.assertEqual(ticket.message, 'Which application do you need access to: GitHub or Jira?')
 
     def test_password_hash_and_no_credentials_in_audits(self):
         with self.sessions() as db:
@@ -1357,9 +1384,9 @@ class AITests(unittest.TestCase):
             self.assertEqual(result.intent,Intent.CLARIFICATION if message=="install" else intent)
     def test_ambiguous_request(self):
         with patch('agent.get_model_client') as client:
-            result=process_request('Tableau')
+            result=process_request('Jira')
         self.assertEqual(result.intent,Intent.CLARIFICATION)
-        self.assertIn('Tableau access', result.message)
+        self.assertIn('Jira access', result.message)
         client.assert_not_called()
     def test_github_chat_asks_for_username_without_model(self):
         with patch('agent.get_model_client') as client:

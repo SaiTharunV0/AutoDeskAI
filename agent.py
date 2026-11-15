@@ -71,7 +71,7 @@ def _resolve_pending_clarification(user_message, previous_response=None):
     if previous_response is None or previous_response.intent != Intent.CLARIFICATION:
         return None
     text = previous_response.message.lower()
-    if "which application" in text and "tableau" in user_message.split():
+    if "which application" in text and any(key in user_message.split() for key in ("github", "jira", "tableau")):
         return AgentResponse(intent=Intent.ACCESS_REQUEST, application=user_message.strip(), message="Access request identified.")
     if "which software" in text and "vscode" in user_message.split():
         return AgentResponse(intent=Intent.SOFTWARE_INSTALL, software="vscode", message="Installation request identified.")
@@ -91,7 +91,8 @@ def _workflow_fallback(safe):
         return validate_agent_response(AgentResponse(intent=Intent.SOFTWARE_INSTALL, software=target,
             message='Software installation requested.'), safe)
     if words & {'access', 'permission', 'grant'}:
-        target = 'tableau' if 'tableau' in words else 'unknown_application' if 'unknown_application' in words else None
+        target = next((key for key in ('github', 'jira', 'tableau') if key in words),
+                      'unknown_application' if 'unknown_application' in words else None)
         return validate_agent_response(AgentResponse(intent=Intent.ACCESS_REQUEST, application=target,
             message='Application access requested.'), safe)
     return None
@@ -130,9 +131,9 @@ def process_request(user_message: str, previous_response: AgentResponse | None =
             return AgentResponse(intent=Intent.CHAT,
                 message="I can help change or reset your organization password, install approved software on your registered device, request application access, or check your request statuses. I can’t answer general questions or perform unrelated actions.")
         if previous_response and previous_response.intent == Intent.CLARIFICATION:
-            return AgentResponse(intent=Intent.CLARIFICATION, message="What would you like help with: your work password, installing Visual Studio Code, or getting access to Tableau?")
-        if words & {"tableau", "vscode"}:
-            return AgentResponse(intent=Intent.CLARIFICATION, message="Would you like Tableau access or Visual Studio Code installation?")
+            return AgentResponse(intent=Intent.CLARIFICATION, message="What would you like help with: your work password, installing Visual Studio Code, or getting access to GitHub or Jira?")
+        if words & {"github", "jira", "vscode"}:
+            return AgentResponse(intent=Intent.CLARIFICATION, message="Do you need GitHub or Jira access, or Visual Studio Code installation?")
         return AgentResponse(intent=Intent.UNSUPPORTED,
             message="I can help only with organization password change/reset, approved software installation, application access, and your request statuses. I can’t help with general questions or unrelated tasks.")
     try:

@@ -4,7 +4,7 @@ Supported intents: PASSWORD_CHANGE, PASSWORD_RESET, SOFTWARE_INSTALL,
 ACCESS_REQUEST, CLARIFICATION, UNSUPPORTED. Never answer general questions.
 Forgot password means PASSWORD_RESET. Change password means PASSWORD_CHANGE.
 Install vscode means SOFTWARE_INSTALL with software="vscode".
-Access tableau means ACCESS_REQUEST with application="tableau".
+Access jira means ACCESS_REQUEST with application="jira".
 Install unapproved_software means SOFTWARE_INSTALL with software="unapproved_software".
 Access unknown_application means ACCESS_REQUEST with application="unknown_application".
 When a target is missing, use CLARIFICATION.
@@ -13,12 +13,12 @@ Never output commands, credentials, reasoning, or authorization decisions.
 The backend owns every policy and action. Keep message under 20 words.
 Always include intent, software, application and message keys.
 Examples:
-Input: i need access to tableau
-Output: {"intent":"ACCESS_REQUEST","software":null,"application":"tableau","message":"Access request identified."}
+Input: i need access to jira
+Output: {"intent":"ACCESS_REQUEST","software":null,"application":"jira","message":"Access request identified."}
 Input: install vscode
 Output: {"intent":"SOFTWARE_INSTALL","software":"vscode","application":null,"message":"Installation request identified."}
 Input: i forgot my password
 Output: {"intent":"PASSWORD_RESET","software":null,"application":null,"message":"Password reset requested."}
 Input: i need access
-Output: {"intent":"CLARIFICATION","software":null,"application":null,"message":"Which application do you need access to?"}
+Output: {"intent":"CLARIFICATION","software":null,"application":null,"message":"Which application do you need access to: GitHub or Jira?"}
 """

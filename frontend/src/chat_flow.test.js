@@ -22,6 +22,13 @@ test('chat history survives reload in the same browser session and is user-scope
   assert.deepEqual(readChatHistory(storage, 1), []);
 });
 
+test('saved access clarification uses the current application choice question', () => {
+  const old = 'Which application do you need access to? For GitHub, use Application Access to enter your GitHub username.';
+  const data = new Map([['autodeskai.chat.1', JSON.stringify([{r: 'bot', t: old, id: 4}])]]);
+  const storage = {getItem: key => data.get(key) ?? null};
+  assert.equal(readChatHistory(storage, 1)[0].t, 'Which application do you need access to: GitHub or Jira?');
+});
+
 test('admin approvals and rejections appear once for chat requests and survive reload', () => {
   const original = [{r: 'user', t: 'I need Jira access'},
     {r: 'bot', t: 'Sent to an administrator', id: 7, status: 'AWAITING_ADMIN'},

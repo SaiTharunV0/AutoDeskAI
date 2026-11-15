@@ -13,6 +13,9 @@ from agent import process_request, safe_message, UnsafeRequest
 from app.chat_limits import check_chat_rate, record_out_of_scope, reset_out_of_scope
 import config
 
+ACCESS_APPLICATION_QUESTION = 'Which application do you need access to: GitHub or Jira?'
+LEGACY_ACCESS_APPLICATION_QUESTION = 'Which application do you need access to? For GitHub, use Application Access to enter your GitHub username.'
+
 def audit(db, user_id, action, resource_type, resource_id, status, details=""):
     db.add(AuditLog(user_id=user_id, action=action, resource_type=resource_type,
                     resource_id=resource_id, status=status, details=details))
@@ -35,6 +38,17 @@ def close_legacy_rejections(db):
         source = 'ADMIN' if request.access and request.access.approver_id else 'AUTODESKAI'
         close_rejected_request(db, request, source)
     db.commit()
+
+def correct_legacy_access_clarifications(db):
+    rows = db.scalars(select(HelpdeskRequest).where(
+        HelpdeskRequest.status == 'NEEDS_CLARIFICATION',
+        HelpdeskRequest.message == LEGACY_ACCESS_APPLICATION_QUESTION)).all()
+    for row in rows:
+        row.message = ACCESS_APPLICATION_QUESTION
+        audit(db, row.user_id, 'ACCESS_CLARIFICATION_UPDATED', 'request', row.id,
+              row.status, 'Application choice prompt updated')
+    if rows:
+        db.commit()
 
 
 def owned_request(db, request_id, user):
@@ -235,7 +249,7 @@ def create_workflow(db, user, payload):
         elif result.message == "Please request one workflow at a time.":
             request.message = result.message
         elif "access" in safe or (previous and "application" in previous.message):
-            request.message = "Which application do you need access to? For GitHub, use Application Access to enter your GitHub username."
+            request.message = ACCESS_APPLICATION_QUESTION
         elif any(word in safe.split() for word in ("install", "installed", "setup", "download")):
             request.message = "Which software would you like to install? I can help with Visual Studio Code."
         else:

@@ -16,7 +16,7 @@ from app.database import Base, engine, get_db, SessionLocal, upgrade_user_profil
 from app.models import *
 from app.schemas import *
 from app.catalog import SOFTWARE, APPLICATIONS, EXAMPLE_APPLICATIONS, HIDDEN_APPLICATIONS
-from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, close_rejected_request, close_legacy_rejections
+from app.workflows import audit, owned_request, create_workflow, expire_tasks, correct_legacy_password_requests, correct_legacy_access_clarifications, close_rejected_request, close_legacy_rejections
 from app.access import catalog_view, save_policy, submit_access, decide_access, retry_provisioning, verify_github_access, correct_legacy_access_requests, close_prior_admin_approvals, retire_application_catalog_entries
 from auth import (get_current_user, require_admin, hash_password, verify_password,
                   create_access_token, validate_config, bearer)
@@ -32,6 +32,7 @@ async def lifespan(app):
     upgrade_query_indexes()
     with SessionLocal() as db:
         correct_legacy_password_requests(db)
+        correct_legacy_access_clarifications(db)
         correct_legacy_access_requests(db)
         close_prior_admin_approvals(db)
         close_legacy_rejections(db)

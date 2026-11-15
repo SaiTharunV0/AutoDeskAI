@@ -1,5 +1,7 @@
 const historyPrefix = 'autodeskai.chat.';
 const maxHistory = 200;
+const oldAccessQuestion = 'Which application do you need access to? For GitHub, use Application Access to enter your GitHub username.';
+const accessQuestion = 'Which application do you need access to: GitHub or Jira?';
 
 export function readChatHistory(storage, userId) {
   try {
@@ -7,7 +9,7 @@ export function readChatHistory(storage, userId) {
     if (!Array.isArray(rows)) return [];
     return rows.slice(-maxHistory).filter(row =>
       (row?.r === 'user' || row?.r === 'bot') && typeof row.t === 'string'
-    ).map(row => ({r: row.r, t: row.t.slice(0, 2000),
+    ).map(row => ({r: row.r, t: (row.t === oldAccessQuestion ? accessQuestion : row.t).slice(0, 2000),
       ...(Number.isInteger(row.id) ? {id: row.id} : {}),
       ...(typeof row.status === 'string' ? {status: row.status} : {}),
       ...(row.decision === 'ADMIN' ? {decision: 'ADMIN'} : {})}));
