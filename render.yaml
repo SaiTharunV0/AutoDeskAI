@@ -30,7 +30,7 @@ services:
       - key: JIRA_API_TOKEN
         sync: false
       - key: JIRA_PRODUCT_KEY
-        sync: false
+        value: jira-software
       - key: JIRA_ROLE_MAP
         value: '{"user":"fd11d17e-a700-4ef9-8432-3714dfeace93"}'
       - key: OLLAMA_TIMEOUT
