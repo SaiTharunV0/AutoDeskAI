@@ -394,6 +394,11 @@ input::placeholder { color: #8498ad; }
   display: block; margin: 10px 0; padding: 10px 12px; background: #0f172a; color: #edf6ff;
   border-radius: 8px; word-break: break-all;
 }
+.tokenValue { display: flex; align-items: stretch; gap: 8px; margin: 10px 0; }
+.tokenValue code { flex: 1; min-width: 0; margin: 0; }
+.tokenCopyButton { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 85px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+.tokenCopyButton:hover { border-color: var(--teal); color: var(--teal); }
+@media (max-width: 560px) { .tokenValue { flex-direction: column; } .tokenCopyButton { align-self: flex-start; } }
 .auditTable { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
 .auditHead { color: #6a7f98; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .auditHead, .auditEntry {
