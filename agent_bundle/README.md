@@ -9,4 +9,4 @@ This bundle contains only the endpoint agent and its installer. The target compu
 
 The token is stored in `%LOCALAPPDATA%\AutoDeskAI\Agent\.env` for the signed-in Windows user. Do not share the token or add the `.env` file to source control. To remove the local agent, run `uninstall-agent.ps1` from the extracted bundle and ask an administrator to disable the device record.
 
-Download the bundle from the repository's **Actions → Windows endpoint agent bundle → latest successful run → Artifacts**. GitHub may require sign-in to download an Actions artifact. The executable is not code-signed, so Windows may show a publisher warning. This build creates a bundle for testing; verify the executable and installer on a designated Windows endpoint before wider deployment.
+Download the public [AutoDeskAI-Agent-Windows.zip](https://github.com/SaiTharunV0/AutoDeskAI/releases/download/agent-v1.0.0/AutoDeskAI-Agent-Windows.zip) release asset. The executable is not code-signed, so Windows may show a publisher warning. Verify the executable and installer on a designated Windows endpoint before wider deployment.

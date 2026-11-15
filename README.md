@@ -101,7 +101,7 @@ npm.cmd run dev
 
 Open `http://127.0.0.1:5173/`. Vite proxies `/api` to FastAPI. API documentation is at `http://127.0.0.1:8000/docs`.
 
-Register through the appropriate portal. The administrator invite code must match the backend setting and should be shared only with intended administrators. For an employee Windows computer, use the [standalone agent bundle](agent_bundle/README.md): download the GitHub Actions artifact, extract it on the endpoint, and run its installer. The endpoint does not need the repository, Git, or Python. The administrator enrolls the device and gives the one-time agent token to the person installing it. The backend stores only a digest of that token. WinGet must be available to the signed-in Windows user.
+Register through the appropriate portal. The administrator invite code must match the backend setting and should be shared only with intended administrators. For an employee Windows computer, use the [standalone agent bundle](agent_bundle/README.md): download the public release ZIP, extract it on the endpoint, and run its installer. The endpoint does not need the repository, Git, or Python. The administrator enrolls the device and gives the one-time agent token to the person installing it. The backend stores only a digest of that token. WinGet must be available to the signed-in Windows user.
 
 For **local development from this repository**, set `SERVER_URL`, `DEVICE_ID`, `AGENT_TOKEN`, and `AGENT_INSTALL_MODE=real` in the ignored `.env` and run:
 
