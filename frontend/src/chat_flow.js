@@ -9,7 +9,8 @@ export function readChatHistory(storage, userId) {
       (row?.r === 'user' || row?.r === 'bot') && typeof row.t === 'string'
     ).map(row => ({r: row.r, t: row.t.slice(0, 2000),
       ...(Number.isInteger(row.id) ? {id: row.id} : {}),
-      ...(typeof row.status === 'string' ? {status: row.status} : {})}));
+      ...(typeof row.status === 'string' ? {status: row.status} : {}),
+      ...(row.decision === 'ADMIN' ? {decision: 'ADMIN'} : {})}));
   } catch { return []; }
 }
 
@@ -20,6 +21,30 @@ export function saveChatHistory(storage, userId, messages) {
 
 export function clearChatHistory(storage, userId) {
   try { storage.removeItem(historyPrefix + userId); } catch { /* Storage can be disabled. */ }
+}
+
+export function appendAdminDecisions(chat, requests) {
+  const chatRequests = new Set(chat.filter(row => row.r === 'bot' && Number.isInteger(row.id)).map(row => row.id));
+  const announced = new Set(chat.filter(row => row.decision === 'ADMIN').map(row => row.id));
+  const updates = [];
+  for (const request of [...requests].reverse()) {
+    if (!chatRequests.has(request.id) || announced.has(request.id) || request.status !== 'CLOSED') continue;
+    let message;
+    if (request.rejection_source === 'ADMIN') {
+      message = request.message || 'An administrator rejected your request. This ticket is closed.';
+    } else if (request.resolution_reporter === 'ADMIN' && request.intent === 'ACCESS_REQUEST' && request.resolved == null) {
+      message = request.message?.startsWith('An administrator approved')
+        ? request.message
+        : `An administrator approved your application access request. ${request.message || 'Check Application Access for provisioning status.'}`;
+    } else if (request.resolution_reporter === 'ADMIN' && request.resolved === true) {
+      message = request.message || 'An administrator marked your request resolved and closed the ticket.';
+    }
+    if (message) {
+      updates.push({r: 'bot', t: message, id: request.id, status: request.status, decision: 'ADMIN'});
+      announced.add(request.id);
+    }
+  }
+  return updates.length ? [...chat, ...updates] : chat;
 }
 
 const asksForNextStep = text => /\b(what|how|where|next|continue|link|microsoft|instructions|steps)\b/i.test(text)

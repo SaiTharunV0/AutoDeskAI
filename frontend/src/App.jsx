@@ -5,7 +5,7 @@ import {requestApi, isConnectionError, SESSION_ERROR} from './api.js';
 import {attachPageGestures} from './gestures.js';
 import {validatedSsprUrl, validatedMicrosoftPasswordActionUrl} from './sspr.js';
 import {CHAT_MESSAGE_LIMIT, chatComposerState} from './chat.js';
-import {readChatHistory, saveChatHistory, clearChatHistory, replyForOpenTicket} from './chat_flow.js';
+import {readChatHistory, saveChatHistory, clearChatHistory, replyForOpenTicket, appendAdminDecisions} from './chat_flow.js';
 import {requestOutcome, requestResolution} from './request_outcome.js';
 import PaginatedRows from './pagination.jsx';
 import {EmployeeAccess, AdminAccess} from './Access.jsx';
@@ -83,6 +83,7 @@ export default function App(){
  },[token,user?.role]);
  useEffect(()=>{if(user?.role==='admin'&&active==='Audit Logs')void adminPoll.current?.refresh('audit')},[active,user?.role]);
  useEffect(()=>{if(!user||user.role==='admin')return;const saved=readChatHistory(chatStorage(),user.id);chatOwnerRef.current=user.id;setChat(saved.length?saved:[{r:'bot',t:`Hello ${user.name}! I can help with password help, live software installation on a connected Windows device, and application access.`}]);setChatOwner(user.id)},[user?.id,user?.role]);
+ useEffect(()=>{if(user?.role!=='admin'&&user?.id===chatOwner&&requests.length)setChat(current=>appendAdminDecisions(current,requests))},[requests,chatOwner,user?.id,user?.role]);
  useEffect(()=>{if(user?.id===chatOwner&&user?.role!=='admin')saveChatHistory(chatStorage(),user.id,chat)},[user?.id,user?.role,chatOwner,chat]);
   async function authenticate(e){e.preventDefault();const f=new FormData(e.currentTarget),password=f.get('password'),loginRole=authRole;if(mode==='register'&&password!==f.get('confirm_password')){setError('Passwords do not match.');return}await act(async()=>{const r=mode==='register'?await api('/auth/register',{method:'POST',body:JSON.stringify({account_role:loginRole,...(loginRole==='admin'?{admin_invite_code:f.get('admin_invite_code')}:{ }),first_name:f.get('first_name'),last_name:f.get('last_name'),date_of_birth:f.get('date_of_birth'),username:f.get('username'),email:f.get('email'),password,confirm_password:f.get('confirm_password')})}):await api('/auth/login',{method:'POST',body:JSON.stringify({identifier:f.get('identifier'),password,expected_role:loginRole})});if(r.user.role!==loginRole)throw new Error('This account cannot sign in through the selected portal.');if(mode==='register'&&r.user.approval_status!=='APPROVED'){setMode('login');setError('Your account was created and is waiting for administrator approval.');return}session.current=r.access_token;storeToken(r.access_token);setToken(r.access_token);setUser(r.user);setActive('Dashboard')})}
  async function send(text=msg){
