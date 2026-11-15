@@ -1,4 +1,4 @@
-"""Jira Cloud group grant for an existing, identifiable site user."""
+"""Invite an approved Jira user, then verify their identity and access."""
 import json
 import os
 import re
@@ -66,6 +66,25 @@ class JiraCloudProvider:
                 candidates = search.json()
                 if not isinstance(candidates, list):
                     return JiraResult('FAILED')
+                newly_invited = False
+                if not candidates:
+                    if getattr(access, 'provisioning_status', None) == 'INVITED':
+                        return JiraResult('INVITED', managed=True)
+                    # Admin approval authorizes the product seat. Jira sends the
+                    # employee an invitation when the account is not on this site.
+                    invited = client.post('/rest/api/3/user', json={
+                        'emailAddress': email, 'products': [self.product_key]})
+                    if invited.status_code not in (200, 201):
+                        return JiraResult('FAILED')
+                    invitee = invited.json()
+                    if not isinstance(invitee, dict):
+                        return JiraResult('FAILED')
+                    if invitee.get('emailAddress', '').strip().lower() != email:
+                        return JiraResult('IDENTITY_MISMATCH')
+                    if invitee.get('accountType') != 'atlassian' or not invitee.get('accountId'):
+                        return JiraResult('INVITED', managed=True)
+                    candidates = [invitee]
+                    newly_invited = True
                 exact = [item for item in candidates
                          if item.get('emailAddress', '').lower() == email
                          and item.get('accountType') == 'atlassian']
@@ -74,6 +93,8 @@ class JiraCloudProvider:
                     return JiraResult('IDENTITY_MISMATCH' if candidates else 'USER_NOT_FOUND')
                 account_id = exact[0]['accountId']
                 if not exact[0].get('active'):
+                    if newly_invited or getattr(access, 'provisioning_status', None) == 'INVITED':
+                        return JiraResult('INVITED', managed=True)
                     return JiraResult('IDENTITY_MISMATCH')
                 path = '/rest/api/3/user/groups'
                 current = client.get(path, params={'accountId': account_id})

@@ -17,6 +17,7 @@ def notify_access_decision(db, access, display_name, source, reason=''):
     title = 'Application access approved' if approved else 'Application access rejected'
     next_step = ('Application access was verified.' if access.provisioning_status == 'GRANTED' else
                  'Accept the GitHub invitation before using it.' if access.provisioning_status == 'PENDING_ACCEPTANCE' else
+                 'Check your email for a Jira invitation, then wait for access verification.' if access.provisioning_status == 'INVITED' else
                  'Access still needs to be set up before you can use it.')
     message = (f'Your request for {display_name} was approved {source}. {next_step}'
                if approved else f'Your request for {display_name} was rejected {source}. {reason}'.strip())
@@ -40,7 +41,7 @@ def attempt_provision(db, policy, access):
     access.last_provision_attempt_at = now()
     try:
         result = provision(policy, access)
-        status = result.status if result.status in ('SIMULATED', 'NOT_CONFIGURED', 'FAILED', 'TIMEOUT', 'IDENTITY_MISMATCH', 'ROLE_MISMATCH', 'USER_NOT_FOUND', 'PRODUCT_ACCESS_REQUIRED', 'PENDING_ACCEPTANCE', 'GRANTED') else 'FAILED'
+        status = result.status if result.status in ('SIMULATED', 'NOT_CONFIGURED', 'FAILED', 'TIMEOUT', 'IDENTITY_MISMATCH', 'ROLE_MISMATCH', 'USER_NOT_FOUND', 'PRODUCT_ACCESS_REQUIRED', 'PENDING_ACCEPTANCE', 'INVITED', 'GRANTED') else 'FAILED'
         if status == 'GRANTED' and not result.verified:
             status = 'FAILED'
         access.provider_managed = bool(access.provider_managed or result.managed)
@@ -62,6 +63,8 @@ def attempt_provision(db, policy, access):
             message='Your application access is active.'))
     elif status == 'PENDING_ACCEPTANCE':
         access.request.message = 'GitHub sent an organization invitation. Accept it, then ask an administrator to verify access.'
+    elif status == 'INVITED':
+        access.request.message = 'Jira sent an invitation. Accept it, then ask an administrator to retry access verification.'
     audit(db, None, 'ACCESS_PROVISIONING_ATTEMPT', 'request', access.request_id,
           status, f'Provider {policy.provider_type}; verified={status == "GRANTED"}')
 
@@ -280,7 +283,7 @@ def retry_provisioning(db, access_id, admin):
     access = db.scalar(select(AccessRequest).where(AccessRequest.id == access_id).with_for_update())
     if not access:
         raise HTTPException(404, 'Access request not found')
-    if access.status != 'APPROVED_PROVISIONING_REQUIRED' or access.provisioning_status not in ('FAILED', 'TIMEOUT', 'NOT_CONFIGURED', 'IDENTITY_MISMATCH', 'ROLE_MISMATCH', 'USER_NOT_FOUND', 'PRODUCT_ACCESS_REQUIRED'):
+    if access.status != 'APPROVED_PROVISIONING_REQUIRED' or access.provisioning_status not in ('FAILED', 'TIMEOUT', 'NOT_CONFIGURED', 'IDENTITY_MISMATCH', 'ROLE_MISMATCH', 'USER_NOT_FOUND', 'PRODUCT_ACCESS_REQUIRED', 'INVITED'):
         raise HTTPException(409, 'Provisioning retry is not available')
     policy = db.get(ApplicationPolicy, access.application)
     if not policy:

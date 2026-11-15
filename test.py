@@ -606,6 +606,36 @@ class WorkflowTests(unittest.TestCase):
         state['email'] = ''
         self.assertEqual(provider.provision(policy, access).status, 'IDENTITY_MISMATCH')
 
+    def test_jira_provider_invites_missing_user_before_group_grant(self):
+        import httpx
+        from types import SimpleNamespace
+        from app.jira_provider import JiraCloudProvider
+        calls = []
+        def handler(request):
+            calls.append((request.method, request.url.path))
+            if request.url.path.endswith('/user/search'):
+                return httpx.Response(200, json=[])
+            if request.method == 'POST' and request.url.path.endswith('/user'):
+                self.assertEqual(__import__('json').loads(request.content), {
+                    'emailAddress': 'employee@example.com', 'products': ['jira-software']})
+                return httpx.Response(201, json={'accountId': 'new-id', 'accountType': 'atlassian',
+                    'emailAddress': 'employee@example.com', 'active': False})
+            return httpx.Response(500)
+        provider = JiraCloudProvider(site='https://example.atlassian.net', admin_email='admin@example.com',
+            api_token='token', role_map='{"user":"group-id"}', product_key='jira-software',
+            transport=httpx.MockTransport(handler))
+        policy = SimpleNamespace(requestable_roles_json='["user"]')
+        access = SimpleNamespace(application='jira', requested_role='user',
+            provider_resource='example.atlassian.net', request=SimpleNamespace(
+                user=SimpleNamespace(email='employee@example.com')))
+        result = provider.provision(policy, access)
+        self.assertEqual(result.status, 'INVITED')
+        self.assertTrue(result.managed)
+        self.assertEqual(calls, [('GET', '/rest/api/3/user/search'), ('POST', '/rest/api/3/user')])
+        access.provisioning_status = 'INVITED'
+        self.assertEqual(provider.provision(policy, access).status, 'INVITED')
+        self.assertEqual(calls.count(('POST', '/rest/api/3/user')), 1)
+
     def test_github_identity_link_requires_admin_confirmation_and_unique_account(self):
         import httpx
         user_id = self.employee['user']['id']
