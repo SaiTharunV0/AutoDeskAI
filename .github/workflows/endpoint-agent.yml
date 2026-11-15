@@ -30,10 +30,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path bundle -Force | Out-Null
           Copy-Item dist/AutoDeskAI-Agent.exe,agent_bundle/install-agent.ps1,agent_bundle/uninstall-agent.ps1,agent_bundle/launch-agent.ps1,agent_bundle/README.md bundle/
-          Compress-Archive -Path bundle/* -DestinationPath AutoDeskAI-Agent-Windows.zip -Force
       - uses: actions/upload-artifact@v4
         with:
           name: AutoDeskAI-Agent-Windows
-          path: AutoDeskAI-Agent-Windows.zip
+          path: bundle/
           if-no-files-found: error
           retention-days: 30
