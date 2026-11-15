@@ -87,3 +87,22 @@ class GitHubOrganizationProvider:
                 return GitHubResult('FAILED')
         except (httpx.TimeoutException, httpx.TransportError, ValueError, KeyError):
             return GitHubResult('FAILED')
+
+    def revoke(self, access):
+        """Remove only membership this service created, after identity checks."""
+        if not self._configured(access) or not access.provider_managed:
+            return GitHubResult('NOT_CONFIGURED')
+        try:
+            with self._client() as client:
+                current = self._check(client, access)
+                if current.status == 'ABSENT':
+                    return GitHubResult('REVOKED', True, True)
+                if current.status != 'GRANTED':
+                    return GitHubResult(current.status if current.status == 'IDENTITY_MISMATCH' else 'FAILED')
+                response = client.delete(f'/orgs/{self.org}/memberships/{access.github_login}')
+                if response.status_code != 204:
+                    return GitHubResult('FAILED')
+                confirmed = self._check(client, access)
+                return GitHubResult('REVOKED', True, True) if confirmed.status == 'ABSENT' else GitHubResult('FAILED')
+        except (httpx.TimeoutException, httpx.TransportError, ValueError, KeyError):
+            return GitHubResult('FAILED')

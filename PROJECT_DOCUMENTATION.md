@@ -80,7 +80,7 @@ An employee says, “I forgot my password.” AutoDeskAI creates a password-rese
 
 ### Example: application access
 
-An employee requests Tableau access. The backend checks the Tableau catalog entry, requested role, duration, and configured conditions. The policy may approve the request automatically, deny it, or require an administrator. If an administrator later approves or rejects it, the employee sees the updated request and a persistent portal notification. An approved result means **access still needs to be provisioned**; it is not a claim that Tableau permissions already exist.
+An employee requests Tableau access. The backend checks the Tableau catalog entry, requested role, duration, and configured conditions. The administrator reviews the request and verifies the intended email identity. If approved, the Tableau Cloud provider can add the user to the configured site and read back the assigned site role. The employee sees the updated request and a persistent portal notification. Approval alone remains **access still needs to be provisioned**; only a verified site role is reported as granted. Tableau Cloud credentials and a role mapping are required before live use.
 
 ### Example: software installation
 
@@ -108,7 +108,7 @@ flowchart LR
     API --> C[Bounded Ollama intent classifier]
     F --> M[Microsoft-hosted password pages]
     API --> P[Access policy evaluator]
-    P --> S[GitHub, mock, or unconfigured provider]
+    P --> S[GitHub, Tableau Cloud, Jira Cloud, mock, or unconfigured provider]
     D[Registered endpoint agent] --> API
 ```
 
@@ -194,7 +194,7 @@ AutoDeskAI uses several layers of protection so that the chat interface cannot d
 - **Constrained model input:** The backend limits chat messages to 2,000 characters, rejects credential-like and command-like text, and sends only recognized workflow tokens to Ollama. Raw free text is not forwarded to the model. This reduces accidental disclosure and narrows the effect of prompt-injection attempts.
 - **Validated model output:** The model returns a structured intent that the backend validates. The backend, not the model's prose, chooses the workflow and checks the application catalog and policy. Unsupported and obvious out-of-scope requests receive fixed replies without a model call.
 - **Backend-owned authorization:** Requested application roles and durations are checked against the current policy. High-risk and human-only roles require an administrator. An administrator cannot decide their own access request. Unknown MFA, directory, or HR facts cannot be treated as verified approval conditions.
-- **No unverified success claim:** An approval remains `APPROVED_PROVISIONING_REQUIRED` until real access could be verified; the built-in provider never grants it. Opening a Microsoft password link is recorded as an action, not proof of completion. Approved Visual Studio Code requests dispatch live Windows installation tasks; only an installed-package check can report success.
+- **No unverified success claim:** An approval remains `APPROVED_PROVISIONING_REQUIRED` until a live provider verifies access. The mock provider never grants access. Opening a Microsoft password link is recorded as an action, not proof of completion. Approved Visual Studio Code requests dispatch live Windows installation tasks; only an installed-package check can report success.
 - **Duplicate and sequence controls:** Client-generated idempotency keys protect against duplicate tickets after retries. The backend blocks a second tracked request while an earlier one remains open, and locks access records before an administrator decides them.
 - **Rate limits:** Persistent per-user counters limit chat submissions to 10 per minute and 60 per hour by default, with a separate limit for repeated out-of-scope attempts. A further limit restricts password requests to five per hour. The chat limit returns HTTP 429 with `Retry-After`.
 
@@ -235,6 +235,6 @@ The repository's [README](README.md#run-locally) contains installation, configur
 
 ## 12. Current limitations and next steps
 
-The main limitations are product boundaries, not hidden features: only GitHub organization membership has a live connector, and it requires backend credentials and identity confirmation; GitHub access expiry is recorded but not automatically enforced. Software installation covers Windows Visual Studio Code only, and there is no callback confirming Microsoft's password outcome. Notifications appear inside the employee portal rather than through email, SMS, or operating-system push. General knowledge ingestion and open-ended IT question answering are outside the current assistant scope. Chat history is tied to the browser tab session rather than stored across devices. Signup does not verify email ownership, and access tokens expire without a refresh-token flow.
+The main limitations are product boundaries, not hidden features: GitHub organization membership, Tableau Cloud site roles, and Jira Cloud group access have connectors, but each needs backend credentials and administrator identity confirmation. Tableau group/content permissions, invitation acceptance checks, and expiry revocation are not implemented. Jira's connector requires an existing active site user with a visible matching email, verifies the mapped group and product role, and cannot automatically invite a missing user; Atlassian's organization invitation API requires a paid subscription. The Tableau and Jira connectors have only been tested with mocked API responses, not live tenants. A scheduled GitHub expiry worker requires a separately configured Render cron service and has not been verified against a live organization. Software installation covers Windows Visual Studio Code only, and there is no callback confirming Microsoft's password outcome. Notifications appear inside the employee portal rather than through email, SMS, or operating-system push. General knowledge ingestion and open-ended IT question answering are outside the current assistant scope. Chat history is tied to the browser tab session rather than stored across devices. New employee signup requires administrator authorization but does not verify email ownership; access tokens expire without a refresh-token flow.
 
 Before using the system as a production helpdesk, the team would need real provider integrations with verified results, stronger identity and account lifecycle controls, operational monitoring, recovery procedures, and evaluation with actual support cases. Additional software or operating systems need separately reviewed package mappings and endpoint controls before being enabled.

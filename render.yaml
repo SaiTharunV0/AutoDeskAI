@@ -39,3 +39,16 @@ services:
         value: "120"
       - key: MICROSOFT_SSPR_URL
         value: https://passwordreset.microsoftonline.com/
+  - type: cron
+    name: autodeskai-github-expiry
+    runtime: python
+    schedule: '0 2 * * *'
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.github_expiry
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GITHUB_ORG
+        value: AutoDeskAI
+      - key: GITHUB_TOKEN
+        sync: false

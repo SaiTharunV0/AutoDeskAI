@@ -1,6 +1,7 @@
 """Deterministic application access decisions and bounded provisioning."""
 import json
 from datetime import timedelta
+from urllib.parse import urlsplit
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +14,7 @@ OPEN_STATES = ('AWAITING_ADMIN', 'APPROVED_PROVISIONING_REQUIRED')
 def notify_access_decision(db, access, display_name, source, reason=''):
     approved = access.status != 'REJECTED'
     title = 'Application access approved' if approved else 'Application access rejected'
-    next_step = ('GitHub membership was verified.' if access.provisioning_status == 'GRANTED' else
+    next_step = ('Application access was verified.' if access.provisioning_status == 'GRANTED' else
                  'Accept the GitHub invitation before using it.' if access.provisioning_status == 'PENDING_ACCEPTANCE' else
                  'Access still needs to be set up before you can use it.')
     message = (f'Your request for {display_name} was approved {source}. {next_step}'
@@ -26,7 +27,7 @@ def attempt_provision(db, policy, access):
     access.last_provision_attempt_at = now()
     try:
         result = provision(policy, access)
-        status = result.status if result.status in ('SIMULATED', 'NOT_CONFIGURED', 'FAILED', 'TIMEOUT', 'IDENTITY_MISMATCH', 'PENDING_ACCEPTANCE', 'GRANTED') else 'FAILED'
+        status = result.status if result.status in ('SIMULATED', 'NOT_CONFIGURED', 'FAILED', 'TIMEOUT', 'IDENTITY_MISMATCH', 'ROLE_MISMATCH', 'USER_NOT_FOUND', 'PRODUCT_ACCESS_REQUIRED', 'PENDING_ACCEPTANCE', 'GRANTED') else 'FAILED'
         if status == 'GRANTED' and not result.verified:
             status = 'FAILED'
         access.provider_managed = bool(access.provider_managed or result.managed)
@@ -39,10 +40,13 @@ def attempt_provision(db, policy, access):
         access.provisioned_at = now()
         access.expires_at = now() + timedelta(days=access.duration_days)
         access.status = access.request.status = 'COMPLETED'
-        access.request.message = 'GitHub organization membership was verified. Report whether you can use the access.'
+        access.request.message = ('GitHub organization membership was verified.' if policy.provider_type == 'GITHUB_ORG'
+                                  else 'Tableau site access was verified.' if policy.provider_type == 'TABLEAU'
+                                  else 'Jira group and product access were verified.' if policy.provider_type == 'JIRA'
+                                  else 'Application access was verified.') + ' Report whether you can use the access.'
         db.add(UserNotification(user_id=access.user_id, request_id=access.request_id,
-            kind='ACCESS_GRANTED', title='GitHub access verified',
-            message='Your GitHub organization membership is active. Please check that you can use it.'))
+            kind='ACCESS_GRANTED', title='Application access verified',
+            message='Your application access is active. Please check that you can use it.'))
     elif status == 'PENDING_ACCEPTANCE':
         access.request.message = 'GitHub sent an organization invitation. Accept it, then ask an administrator to verify access.'
     audit(db, None, 'ACCESS_PROVISIONING_ATTEMPT', 'request', access.request_id,
@@ -64,6 +68,10 @@ def catalog_view(row):
 def save_policy(db, row, payload, actor_id):
     if payload.provider_type == 'GITHUB_ORG' and (payload.key != 'github' or payload.requestable_roles != ['member'] or payload.approval_mode != 'ADMIN_ONLY'):
         raise HTTPException(422, 'GitHub provider requires the github application, member role, and administrator approval')
+    if payload.provider_type == 'TABLEAU' and (payload.key != 'tableau' or payload.approval_mode != 'ADMIN_ONLY' or payload.auto_allowed):
+        raise HTTPException(422, 'Tableau provider requires the tableau application and administrator approval')
+    if payload.provider_type == 'JIRA' and (payload.key != 'jira' or payload.approval_mode != 'ADMIN_ONLY' or payload.auto_allowed):
+        raise HTTPException(422, 'Jira provider requires the jira application and administrator approval')
     values = payload.model_dump(exclude={'key'})
     for name, value in values.items():
         if name in ('requestable_roles', 'allowed_groups', 'conditions', 'human_roles'):
@@ -187,7 +195,9 @@ def submit_access(db, user, application, requested_role, justification, duration
         decision_reason=reason, provisioning_status='NOT_STARTED',
         decision_at=now() if status != 'AWAITING_ADMIN' else None,
         github_login=login, github_user_id=github_id,
-        provider_resource=os.getenv('GITHUB_ORG', '') if row.provider_type == 'GITHUB_ORG' else None)
+        provider_resource=os.getenv('GITHUB_ORG', '') if row.provider_type == 'GITHUB_ORG' else
+                          os.getenv('TABLEAU_SITE_CONTENT_URL', '') if row.provider_type == 'TABLEAU' else
+                          urlsplit(os.getenv('JIRA_SITE_URL', '')).hostname if row.provider_type == 'JIRA' else None)
     db.add(access)
     if status == 'APPROVED_PROVISIONING_REQUIRED':
         attempt_provision(db, row, access)
@@ -243,7 +253,7 @@ def retry_provisioning(db, access_id, admin):
     access = db.scalar(select(AccessRequest).where(AccessRequest.id == access_id).with_for_update())
     if not access:
         raise HTTPException(404, 'Access request not found')
-    if access.status != 'APPROVED_PROVISIONING_REQUIRED' or access.provisioning_status not in ('FAILED', 'TIMEOUT', 'NOT_CONFIGURED', 'IDENTITY_MISMATCH'):
+    if access.status != 'APPROVED_PROVISIONING_REQUIRED' or access.provisioning_status not in ('FAILED', 'TIMEOUT', 'NOT_CONFIGURED', 'IDENTITY_MISMATCH', 'ROLE_MISMATCH', 'USER_NOT_FOUND', 'PRODUCT_ACCESS_REQUIRED'):
         raise HTTPException(409, 'Provisioning retry is not available')
     policy = db.get(ApplicationPolicy, access.application)
     if not policy:

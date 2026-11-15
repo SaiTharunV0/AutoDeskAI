@@ -439,6 +439,112 @@ class WorkflowTests(unittest.TestCase):
         notices = self.client.get('/notifications', headers=self.headers()).json()
         self.assertEqual(sum(row['kind'] == 'ACCESS_GRANTED' for row in notices), 1)
 
+    def test_tableau_requires_admin_and_verified_site_role(self):
+        from app.tableau_provider import TableauResult
+        payload = self.access_policy_payload(key='tableau', requestable_roles=['viewer'],
+            provider_type='TABLEAU')
+        self.assertEqual(self.client.put('/admin/access/applications/tableau',
+            headers=self.headers(self.admin), json=payload).status_code, 200)
+        submitted = self.client.post('/access/requests', headers=self.headers(), json={
+            'application': 'tableau', 'requested_role': 'viewer', 'duration_days': 30,
+            'idempotency_key': secrets.token_hex(16)}).json()
+        self.assertEqual(submitted['status'], 'AWAITING_ADMIN')
+        with patch('app.tableau_provider.TableauCloudProvider.provision',
+                   return_value=TableauResult('ROLE_MISMATCH')):
+            approved = self.client.post(f"/admin/access/requests/{submitted['id']}/decision",
+                headers=self.headers(self.admin), json={'decision': 'APPROVE'}).json()
+        self.assertEqual(approved['provisioning_status'], 'ROLE_MISMATCH')
+        self.assertEqual(approved['status'], 'APPROVED_PROVISIONING_REQUIRED')
+        with patch('app.tableau_provider.TableauCloudProvider.provision',
+                   return_value=TableauResult('GRANTED', True, True)):
+            retried = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/retry",
+                headers=self.headers(self.admin)).json()
+        self.assertEqual(retried['status'], 'COMPLETED')
+        self.assertEqual(retried['provisioning_status'], 'GRANTED')
+        self.assertTrue(retried['provider_managed'])
+
+    def test_tableau_provider_checks_assigned_role_and_identity(self):
+        import httpx
+        from types import SimpleNamespace
+        from app.tableau_provider import TableauCloudProvider
+        calls = []
+        assigned = {'role': 'Unlicensed'}
+        def handler(request):
+            calls.append((request.method, request.url.path))
+            if request.url.path.endswith('/auth/signin'):
+                return httpx.Response(200, json={'credentials': {'token': 'session',
+                    'site': {'id': 'site-id', 'contentUrl': 'example'}}})
+            if request.method == 'GET' and request.url.path.endswith('/users'):
+                return httpx.Response(200, json={'users': {'user': []}})
+            if request.method == 'POST' and request.url.path.endswith('/users'):
+                return httpx.Response(201, json={'user': {'id': 'user-id',
+                    'name': 'employee@example.com', 'siteRole': assigned['role']}})
+            return httpx.Response(200, json={'user': {'id': 'user-id',
+                'name': 'employee@example.com', 'siteRole': assigned['role']}})
+        policy = SimpleNamespace(requestable_roles_json='["viewer"]')
+        access = SimpleNamespace(application='tableau', requested_role='viewer',
+            provider_resource='example', request=SimpleNamespace(
+                user=SimpleNamespace(email='employee@example.com')))
+        provider = TableauCloudProvider(host='https://prod-ca-a.online.tableau.com',
+            site='example', pat_name='name', pat_secret='secret',
+            role_map='{"viewer":"Viewer"}', transport=httpx.MockTransport(handler))
+        self.assertEqual(provider.provision(policy, access).status, 'ROLE_MISMATCH')
+        assigned['role'] = 'Viewer'
+        self.assertEqual(provider.provision(policy, access).status, 'GRANTED')
+        self.assertIn(('GET', '/api/3.29/sites/site-id/users/user-id'), calls)
+
+    def test_jira_requires_admin_and_verified_group(self):
+        from app.jira_provider import JiraResult
+        payload = self.access_policy_payload(key='jira', requestable_roles=['user'],
+            provider_type='JIRA')
+        self.assertEqual(self.client.post('/admin/access/applications',
+            headers=self.headers(self.admin), json=payload).status_code, 201)
+        submitted = self.client.post('/access/requests', headers=self.headers(), json={
+            'application': 'jira', 'requested_role': 'user', 'duration_days': 30,
+            'idempotency_key': secrets.token_hex(16)}).json()
+        self.assertEqual(submitted['status'], 'AWAITING_ADMIN')
+        with patch('app.jira_provider.JiraCloudProvider.provision',
+                   return_value=JiraResult('USER_NOT_FOUND')):
+            approved = self.client.post(f"/admin/access/requests/{submitted['id']}/decision",
+                headers=self.headers(self.admin), json={'decision': 'APPROVE'}).json()
+        self.assertEqual(approved['provisioning_status'], 'USER_NOT_FOUND')
+        with patch('app.jira_provider.JiraCloudProvider.provision',
+                   return_value=JiraResult('GRANTED', True, True)):
+            retried = self.client.post(f"/admin/access/requests/{submitted['id']}/provisioning/retry",
+                headers=self.headers(self.admin)).json()
+        self.assertEqual(retried['status'], 'COMPLETED')
+        self.assertTrue(retried['provider_managed'])
+
+    def test_jira_provider_verifies_exact_identity_group_and_product(self):
+        import httpx
+        from types import SimpleNamespace
+        from app.jira_provider import JiraCloudProvider
+        state = {'in_group': False, 'product': False, 'email': 'employee@example.com'}
+        def handler(request):
+            path = request.url.path
+            if path.endswith('/user/search'):
+                return httpx.Response(200, json=[{'accountId': 'account-id', 'accountType': 'atlassian',
+                    'emailAddress': state['email'], 'active': True}])
+            if path.endswith('/user/groups'):
+                return httpx.Response(200, json=[{'groupId': 'group-id'}] if state['in_group'] else [])
+            if path.endswith('/group/user'):
+                state['in_group'] = True
+                return httpx.Response(201, json={})
+            return httpx.Response(200, json={'accountId': 'account-id', 'active': True,
+                'applicationRoles': {'items': [{'key': 'jira-software'}] if state['product'] else []}})
+        policy = SimpleNamespace(requestable_roles_json='["user"]')
+        access = SimpleNamespace(application='jira', requested_role='user',
+            provider_resource='example.atlassian.net', request=SimpleNamespace(
+                user=SimpleNamespace(email='employee@example.com')))
+        provider = JiraCloudProvider(site='https://example.atlassian.net', admin_email='admin@example.com',
+            api_token='token', role_map='{"user":"group-id"}', product_key='jira-software',
+            transport=httpx.MockTransport(handler))
+        self.assertEqual(provider.provision(policy, access).status, 'PRODUCT_ACCESS_REQUIRED')
+        state['product'] = True
+        self.assertEqual(provider.provision(policy, access).status, 'GRANTED')
+        state['email'] = ''
+        self.assertEqual(provider.provision(policy, access).status, 'IDENTITY_MISMATCH')
+
     def test_github_identity_link_requires_admin_confirmation_and_unique_account(self):
         import httpx
         user_id = self.employee['user']['id']
@@ -498,6 +604,58 @@ class WorkflowTests(unittest.TestCase):
         calls.clear()
         self.assertEqual(provider.provision(access).status, 'IDENTITY_MISMATCH')
         self.assertFalse(any(method == 'PUT' for method, _ in calls))
+
+    def test_github_revocation_requires_managed_verified_membership(self):
+        import httpx
+        from types import SimpleNamespace
+        from app.github_provider import GitHubOrganizationProvider
+        calls = []
+        active = [True]
+        def handler(request):
+            calls.append(request.method)
+            if request.url.path == '/users/employee-gh':
+                return httpx.Response(200, json={'id': 123})
+            if request.url.path.endswith('/invitations'):
+                return httpx.Response(200, json=[])
+            if request.method == 'DELETE':
+                active[0] = False
+                return httpx.Response(204)
+            return httpx.Response(200, json={'state': 'active'}) if active[0] else httpx.Response(404)
+        provider = GitHubOrganizationProvider(org='AutoDeskAI', token='test-token', transport=httpx.MockTransport(handler))
+        access = SimpleNamespace(github_login='employee-gh', github_user_id=123,
+            provider_resource='AutoDeskAI', requested_role='member', provider_managed=False)
+        self.assertEqual(provider.revoke(access).status, 'NOT_CONFIGURED')
+        self.assertEqual(calls, [])
+        access.provider_managed = True
+        self.assertEqual(provider.revoke(access).status, 'REVOKED')
+        self.assertEqual(calls.count('DELETE'), 1)
+        self.assertEqual(provider.revoke(access).status, 'REVOKED')
+        self.assertEqual(calls.count('DELETE'), 1)
+
+    def test_github_expiry_records_failed_revocation_and_retries(self):
+        from datetime import timedelta
+        from types import SimpleNamespace
+        from app.github_expiry import expire_github_access
+        from app.github_provider import GitHubResult
+        with self.sessions() as db:
+            ticket = HelpdeskRequest(user_id=self.employee['user']['id'], intent='ACCESS_REQUEST',
+                status='CLOSED', message='Prior grant', idempotency_key=secrets.token_hex(16))
+            db.add(ticket)
+            db.flush()
+            grant = AccessRequest(request_id=ticket.id, user_id=self.employee['user']['id'],
+                application='github', status='COMPLETED', decision_reason='Approved',
+                provisioning_status='GRANTED', provider_managed=True,
+                provider_resource='AutoDeskAI', github_login='employee-gh', github_user_id=123,
+                expires_at=now() - timedelta(days=1))
+            db.add(grant)
+            db.commit()
+            failed = SimpleNamespace(revoke=lambda access: GitHubResult('FAILED'))
+            self.assertEqual(expire_github_access(db, failed), [(grant.id, 'EXPIRED_REVOKE_FAILED')])
+            self.assertEqual(grant.status, 'EXPIRED_REVOKE_FAILED')
+            succeeded = SimpleNamespace(revoke=lambda access: GitHubResult('REVOKED', True, True))
+            self.assertEqual(expire_github_access(db, succeeded), [(grant.id, 'REVOKED')])
+            self.assertEqual(grant.status, 'EXPIRED')
+            self.assertEqual(expire_github_access(db, succeeded), [])
 
     def test_application_access_migration_preserves_existing_rows(self):
         old = create_engine('sqlite://')
