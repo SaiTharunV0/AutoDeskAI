@@ -15,7 +15,7 @@ export default function PaginatedRows({rows = [], children}) {
 
   return <>
     {children(pageRows)}
-    {rows.length > 0 && <Pagination total={rows.length} page={currentPage} pageSize={pageSize}
+    {rows.length > 10 && <Pagination total={rows.length} page={currentPage} pageSize={pageSize}
       onPageChange={setPage} onPageSizeChange={size => {setPageSize(size); setPage(1)}}/>}
   </>;
 }
