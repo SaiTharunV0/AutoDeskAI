@@ -32,7 +32,7 @@ services:
       - key: JIRA_PRODUCT_KEY
         sync: false
       - key: JIRA_ROLE_MAP
-        sync: false
+        value: '{"user":"fd11d17e-a700-4ef9-8432-3714dfeace93"}'
       - key: OLLAMA_TIMEOUT
         value: "90"
       - key: CHAT_RATE_LIMIT_PER_MINUTE
